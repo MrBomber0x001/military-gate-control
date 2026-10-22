@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>إدارة البيانات — التحكم في البوابات</title>
+<link href="/app.css" rel="stylesheet">
+<script>
+if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.classList.add('dark')</script>
+</head>
+<body class="bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 font-sans">
+<header class="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 md:px-6">
+  <div class="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white font-bold">ب</div>
+  <div class="font-semibold">إدارة البيانات</div>
+  <button onclick="changeOwnPasswordForm()" class="ms-auto rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800">تغيير كلمة مروري</button>
+  <a href="/" class="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800">العودة للوحة العمليات</a>
+  <button onclick="logout()" class="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800">خروج</button>
+</header>
+<nav id="tabs" class="flex gap-2 overflow-x-auto px-4 md:px-6 pt-4"></nav>
+<div id="content" class="p-4 md:p-6 space-y-6"></div>
+
+<div id="drawer" class="fixed inset-0 z-40 hidden">
+  <div class="absolute inset-0 bg-black/40" onclick="closeDrawer()"></div>
+  <div class="absolute end-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-900 border-s border-slate-200 dark:border-slate-800 p-5 overflow-y-auto">
+    <div class="flex items-center justify-between mb-4"><h3 id="dTitle" class="text-lg font-semibold"></h3><button onclick="closeDrawer()" aria-label="إغلاق" class="rounded-lg px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800">✕</button></div>
+    <div id="dBody" class="space-y-3 text-sm"></div>
+  </div>
+</div>
+<div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden rounded-xl bg-slate-900 text-white px-4 py-2 text-sm shadow-lg"></div>
+
+<script>
+let TAB='personnel',LK={},CACHE={};
+const INP='mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(u,m='GET',b){const r=await fetch('/api/'+u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+  if(r.status===401){location.href='/login.html';throw new Error('انتهت الجلسة')}
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'حدث خطأ');return j}
+const toast=m=>{toast.el=toast.el||document.getElementById('toast');toast.el.textContent=m;toast.el.classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(()=>toast.el.classList.add('hidden'),2400)};
+const run=async f=>{try{await f()}catch(e){toast(e.message)}};
+const closeDrawer=()=>document.getElementById('drawer').classList.add('hidden');
+const openDrawer=(t,h)=>{dTitle.textContent=t;dBody.innerHTML=h;drawer.classList.remove('hidden')};
+const logout=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
+function changeOwnPasswordForm(){openDrawer('تغيير كلمة المرور',`<div><label class="text-xs font-medium">كلمة المرور الحالية</label>${inp('pw_current','','password','autocomplete="current-password"')}</div>
+  <div><label class="text-xs font-medium">كلمة المرور الجديدة (٨ أحرف على الأقل)</label>${inp('pw_new','','password','autocomplete="new-password"')}</div>
+  <div><label class="text-xs font-medium">تأكيد كلمة المرور الجديدة</label>${inp('pw_confirm','','password','autocomplete="new-password"')}</div>
+  <div class="pt-2">${btn('حفظ كلمة المرور','saveOwnPassword()')}</div>`)}
+const saveOwnPassword=()=>run(async()=>{const new_password=val('pw_new');
+  if(new_password!==val('pw_confirm'))throw new Error('كلمتا المرور الجديدتان غير متطابقتين');
+  await api('auth/change-password','POST',{current_password:val('pw_current'),new_password});
+  closeDrawer();toast('تم تغيير كلمة المرور')});
+const btn=(l,o,s='primary')=>`<button onclick="${o}" class="rounded-xl px-3 py-2 text-sm font-medium ${{primary:'bg-brand-600 hover:bg-brand-700 text-white',ghost:'border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800',danger:'bg-rose-600 hover:bg-rose-700 text-white'}[s]}">${l}</button>`;
+const tag=(text,color)=>`<span class="rounded-full px-2.5 py-1 text-xs font-semibold ${color==='green'?'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300':'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'}">${text}</span>`;
+const card=(t,a,b)=>`<section class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"><div class="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 px-5 py-4"><h2 class="font-semibold">${t}</h2><div>${a||''}</div></div><div class="p-5">${b}</div></section>`;
+const table=(h,r)=>`<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-xs text-slate-500">${h.map(x=>`<th class="pb-3 pe-4 text-start font-medium">${x}</th>`).join('')}</tr></thead><tbody class="divide-y divide-slate-100 dark:divide-slate-800">${r}</tbody></table></div>`;
+const empty=t=>`<div class="py-10 text-center text-slate-500">${t}</div>`;
+const opt=k=>(LK[k]||[]).map(x=>[x.name,x.name]);
+const sel=(id,opts,val,extra='')=>`<select id="${id}" ${extra} class="${INP}"><option value="">— اختر —</option>${opts.map(([v,t])=>`<option value="${esc(v)}" ${String(v)===String(val??'')?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
+const inp=(id,v,t='text',x='')=>`<input id="${id}" type="${t}" value="${esc(v)}" ${x} class="${INP}"/>`;
+const val=id=>document.getElementById(id).value;
+const hint=k=>(LK[k]||[]).length?'':`<div class="text-xs text-amber-600">القائمة فارغة — أضف عناصر من تبويب «القوائم» أولاً.</div>`;
+
+const LISTS=[['unit','الوحدات'],['vehicle','أسماء / أنواع المركبات'],['purpose','أسباب دخول المركبات'],['visit_reason','أسباب الزيارة'],['destination','جهات المأموريات'],['gate','البوابات']];
+const CFG={
+ personnel:{title:'فرد',plural:'الأفراد',sub:'الضباط والجنود والضباط المتقاعدون والمدنيون (والسائقون يُختارون من هنا).',cols:['الاسم','الرقم العسكري / الوظيفي','الرتبة / الصفة','الفئة','الوحدة','الهاتف'],
+  row:p=>[esc(p.name),`<span dir="ltr">${esc(p.mid)}</span>`,esc(p.rank),esc(p.cat),esc(p.unit),`<span dir="ltr">${esc(p.phone)}</span>`],
+  fields:r=>[['name','الاسم الكامل',inp('f_name',r.name)],['mid','الرقم العسكري / الوظيفي',inp('f_mid',r.mid,'text','dir="ltr"')],['rank','الرتبة / الصفة',sel('f_rank',(LK.rank||[]).map(x=>[x.name,x.name+' — '+x.cat]),r.rank)],['retired','الفئة',sel('f_retired',[['0','ضابط عامل / صف ضابط / جندي / مدني'],['1','ضابط متقاعد']],r.retired?'1':'0')],['unit','الوحدة',sel('f_unit',opt('unit'),r.unit)+hint('unit')],['phone','الهاتف',inp('f_phone',r.phone,'text','dir="ltr"')]]},
+ vehicles:{title:'مركبة',plural:'المركبات',sub:'يسجل هنا تعريف المركبة وسببها؛ يحدد المشغّل السائق والمرافق يومياً من صفحة المركبات.',cols:['اللوحة','المركبة','السبب'],
+  row:v=>[esc(v.plate),esc(v.type),esc(v.purpose||'—')],
+  fields:r=>[['plate','رقم اللوحة',inp('f_plate',r.plate)],['vehicle','المركبة',sel('f_vehicle',opt('vehicle'),r.vehicle)+hint('vehicle')],
+   ['purpose','السبب',sel('f_purpose',opt('purpose'),r.purpose)+hint('purpose')]]}
+};
+
+function edit(e,id){const c=CFG[e],r=id?CACHE[e].find(x=>x.id===id):{};
+  openDrawer((id?'تعديل ':'إضافة ')+c.title,c.fields(r).map(([k,l,h])=>`<div><label class="text-xs font-medium">${l}</label>${h}</div>`).join('')+`<div class="pt-2">${btn('حفظ',`saveEnt('${e}',${id||0})`)}</div>`);
+}
+const saveEnt=(e,id)=>run(async()=>{const b={};CFG[e].fields(id?CACHE[e].find(x=>x.id===id):{}).forEach(([k])=>b[k]=val('f_'+k));
+  await api(`admin/${e}${id?'/'+id:''}`,id?'PUT':'POST',b);closeDrawer();toast('تم الحفظ');render()});
+const del=(e,id)=>confirm('تأكيد الحذف؟')&&run(async()=>{await api(`admin/${e}/${id}`,'DELETE');toast('تم الحذف');render()});
+
+const addLookup=k=>run(async()=>{const i=document.getElementById('add_'+k);if(!i.value.trim())return;await api('admin/lookups','POST',{kind:k,name:i.value});render()});
+const delLookup=id=>run(async()=>{await api('admin/lookups/'+id,'DELETE');render()});
+
+function userForm(){openDrawer('إضافة مستخدم',`<div><label class="text-xs font-medium">الاسم الكامل</label>${inp('u_name','')}</div><div><label class="text-xs font-medium">اسم المستخدم (إنجليزي)</label>${inp('u_user','','text','dir="ltr"')}</div><div><label class="text-xs font-medium">كلمة المرور (٨ أحرف على الأقل)</label>${inp('u_pass','','password','dir="ltr"')}</div><div><label class="text-xs font-medium">الصلاحية</label><select id="u_role" class="${INP}"><option value="operator">مشغّل بوابة</option><option value="admin">مدير</option></select></div><div class="pt-2">${btn('إنشاء المستخدم','saveUser()')}</div>`)}
+const saveUser=()=>run(async()=>{await api('admin/users','POST',{full_name:val('u_name'),username:val('u_user'),password:val('u_pass'),role:val('u_role')});closeDrawer();toast('تم إنشاء المستخدم');render()});
+const patchUser=(id,b)=>run(async()=>{await api('admin/users/'+id,'PUT',b);toast('تم التحديث');render()});
+const resetPw=id=>openDrawer('إعادة تعيين كلمة المرور',`<div><label class="text-xs font-medium">كلمة المرور الجديدة (٨ أحرف على الأقل)</label>${inp('u_pass','','password','dir="ltr"')}</div><div class="pt-2">${btn('حفظ','saveUserPassword('+id+')')}</div>`);
+const saveUserPassword=id=>run(async()=>{await api('admin/users/'+id,'PUT',{password:val('u_pass')});closeDrawer();toast('تم تحديث كلمة المرور');render()});
+function adminSquadForm(){
+  const date=new Date(),today=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  openDrawer('إنشاء فرقة',`<div><label class="text-xs font-medium" for="squad_name">اسم الفرقة</label>${inp('squad_name','','text','required maxlength="100"')}</div>
+    <div><label class="text-xs font-medium" for="squad_start">تاريخ البداية</label>${inp('squad_start',today,'date','required')}</div>
+    <div><label class="text-xs font-medium" for="squad_end">تاريخ النهاية</label>${inp('squad_end',today,'date','required')}</div>
+    <p class="text-xs text-slate-500">بعد إنشاء الفرقة، أضف أفرادها من قائمة «إدارة الأفراد». يسجل المشغّلون التمام والانصراف اليوميين من صفحة الفرق.</p>
+    <div class="pt-2">${btn('إنشاء الفرقة','saveAdminSquad()')}</div>`);
+}
+const saveAdminSquad=()=>run(async()=>{
+  const name=val('squad_name').trim(),start_date=val('squad_start'),end_date=val('squad_end');
+  if(!name||!start_date||!end_date||end_date<start_date)throw new Error('أدخل اسم الفرقة وتاريخي بداية ونهاية صحيحين');
+  await api('squads','POST',{name,start_date,end_date});
+  closeDrawer();toast('تم إنشاء الفرقة');render();
+});
+async function manageAdminSquad(id){
+  const date=new Date(),today=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  const [squad,people]=await Promise.all([api(`squads/${id}?date=${today}`),api('personnel')]);
+  const memberIds=new Set(squad.members.map(member=>member.person_id));
+  const available=people.filter(person=>!memberIds.has(person.id));
+  const rows=squad.members.map(member=>`<tr><td class="py-3 pe-4 font-medium">${esc(member.name)}<div class="text-xs text-slate-500">${esc(member.mid)}</div></td><td class="pe-4">${esc(member.rank)}</td><td class="pe-4">${member.enter_ts?esc(member.enter_ts.slice(11,16)):'لم يسجل بعد'}</td><td class="pe-4">${member.exit_ts?esc(member.exit_ts.slice(11,16)):member.enter_ts?'لم ينصرف بعد':'—'}</td><td class="pe-4">${btn('إزالة من الفرقة',`removeAdminSquadMember(${id},${member.person_id})`,'danger')}</td></tr>`).join('');
+  const addForm=available.length?`<div class="mt-4 flex items-end gap-2"><div class="flex-1"><label class="text-xs font-medium" for="squad_member">إضافة فرد للفرقة</label><select id="squad_member" class="${INP}">${available.map(person=>`<option value="${person.id}">${esc(person.name)} — ${esc(person.rank)}</option>`).join('')}</select></div>${btn('إضافة','addAdminSquadMember('+id+')')}</div>`:'<p class="mt-4 text-sm text-slate-500">كل الأفراد المسجلين مضافون إلى هذه الفرقة.</p>';
+  openDrawer(`إدارة أفراد ${squad.name}`,`<p class="text-xs text-slate-500">مدة الفرقة: ${esc(squad.start_date)} — ${esc(squad.end_date)} • بيانات الحضور المعروضة تخص اليوم ${esc(today)}. الحضور والانصراف يسجلان من صفحة الفرق.</p>
+    ${squad.members.length?table(['الفرد / الرقم','الرتبة','التمام اليومي','الانصراف اليومي','إجراء'],rows):empty('لم تتم إضافة أفراد لهذه الفرقة بعد.')}${addForm}`);
+}
+const addAdminSquadMember=id=>run(async()=>{
+  await api(`squads/${id}/members`,'POST',{person_id:val('squad_member')});
+  toast('تمت إضافة الفرد للفرقة');await render();await manageAdminSquad(id);
+});
+const removeAdminSquadMember=(id,personId)=>confirm('إزالة الفرد من هذه الفرقة؟ سيُحذف سجل حضوره وانصرافه المرتبط بها.')&&run(async()=>{
+  await api(`admin/squads/${id}/members/${personId}`,'DELETE');
+  toast('تمت إزالة الفرد من الفرقة');await render();await manageAdminSquad(id);
+});
+async function taskForm(){
+  const users=(await api('admin/users')).filter(user=>user.active&&user.role==='operator');
+  openDrawer('إرسال تكليف للأعضاء',`<div><label class="text-xs font-medium" for="task_title">عنوان التكليف</label>${inp('task_title','','text','maxlength="150" required')}</div>
+    <div><label class="text-xs font-medium" for="task_details">التفاصيل</label><textarea id="task_details" maxlength="2000" rows="4" class="${INP}"></textarea></div>
+    <div><label class="text-xs font-medium" for="task_recipient">إرسال إلى</label><select id="task_recipient" class="${INP}"><option value="all">كل مشغّلي البوابة النشطين (${users.length})</option>${users.map(user=>`<option value="${user.id}">${esc(user.full_name||user.username)} — ${esc(user.username)}</option>`).join('')}</select></div>
+    <p class="text-xs text-slate-500">سيظهر التكليف في صفحة «التكليفات» لدى العضو، ويمكنه تأكيد استلامه.</p>
+    <div class="pt-2">${btn('إرسال التكليف','saveTask()')}</div>`);
+}
+const saveTask=()=>run(async()=>{
+  const title=val('task_title').trim(),details=val('task_details').trim(),recipient=val('task_recipient');
+  if(!title)throw new Error('أدخل عنوان التكليف');
+  if(title.length>150||details.length>2000)throw new Error('العنوان حتى ١٥٠ حرفاً والتفاصيل حتى ٢٠٠٠ حرف');
+  const result=await api('admin/tasks','POST',{title,details,recipient});
+  closeDrawer();toast(`تم إرسال التكليف إلى ${result.recipients} عضو`);render();
+});
+const createBackup=()=>run(async()=>{await api('admin/backups','POST',{});toast('تم إنشاء النسخة الاحتياطية');render()});
+const restoreBackup=name=>confirm('سيتم استبدال البيانات الحالية بمحتوى النسخة المحددة. سيُنشأ حفظ أمان للحالة الحالية أولاً، وبعد الاستعادة ستحتاج إلى تسجيل الدخول مجدداً. هل تريد المتابعة؟')&&run(async()=>{
+  await api('admin/backups/'+encodeURIComponent(name)+'/restore','POST',{});
+  toast('تمت الاستعادة؛ جارٍ تحويلك لتسجيل الدخول');
+  setTimeout(()=>location.href='/login.html',1200);
+});
+
+const head=(t,s,a='')=>`<div class="flex flex-wrap items-center justify-between gap-3"><div><h1 class="text-2xl font-bold">${t}</h1><p class="text-sm text-slate-500">${s}</p></div>${a}</div>`;
+async function render(){
+  document.getElementById('tabs').innerHTML=[...Object.entries(CFG).map(([k,c])=>[k,c.plural]),['squads','الفرق'],['tasks','التكليفات'],['lists','القوائم'],['users','المستخدمون'],['backups','النسخ الاحتياطي']].map(([k,l])=>`<button onclick="TAB='${k}';render()" class="whitespace-nowrap rounded-xl px-4 py-2 text-sm ${TAB===k?'bg-brand-600 text-white font-semibold':'border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'}">${l}</button>`).join('');
+  const c=document.getElementById('content');
+  try{LK=await api('lookups');
+   if(CFG[TAB]){const rows=CACHE[TAB]=await api(TAB),f=CFG[TAB];
+     c.innerHTML=head(f.plural,f.sub,btn('+ إضافة '+f.title,`edit('${TAB}',0)`))+card(f.plural,`<span class="text-xs text-slate-500">${rows.length} سجل</span>`,rows.length?table([...f.cols,'إجراءات'],rows.map(r=>`<tr>${f.row(r).map((x,i)=>`<td class="py-3 pe-4 ${i?'':'font-medium'}">${x}</td>`).join('')}<td class="pe-4"><div class="flex gap-2">${btn('تعديل',`edit('${TAB}',${r.id})`,'ghost')}${btn('حذف',`del('${TAB}',${r.id})`,'danger')}</div></td></tr>`).join('')):empty('لا توجد سجلات بعد. ابدأ بالإضافة.'))}
+   else if(TAB==='squads'){
+     const squads=await api('admin/squads');
+     const rows=squads.map(squad=>`<tr><td class="py-3 pe-4 font-medium">${esc(squad.name)}</td><td class="pe-4">${esc(squad.start_date)}</td><td class="pe-4">${esc(squad.end_date)}</td><td class="pe-4">${squad.member_count}</td><td class="pe-4"><div class="flex gap-2">${btn('إدارة الأفراد',`run(()=>manageAdminSquad(${squad.id}))`,'ghost')}${btn('حذف الفرقة',`del('squads',${squad.id})`,'danger')}</div></td></tr>`).join('');
+     c.innerHTML=head('إدارة الفرق','الأدمن فقط ينشئ الفرق ويحدد أفرادها. التمام والانصراف اليوميان يسجلان من صفحة «الفرق» في العمليات.',btn('+ إنشاء فرقة','adminSquadForm()'))+
+       card('الفرق المسجلة',`<span class="text-xs text-slate-500">${squads.length} فرقة</span>`,squads.length?table(['الفرقة','البداية','النهاية','عدد الأفراد','الإجراءات'],rows):empty('لا توجد فرق بعد. أنشئ فرقة ثم أضف أفرادها.'))}
+   else if(TAB==='tasks'){
+     const assignments=await api('admin/tasks');
+     c.innerHTML=head('تكليفات الأعضاء','أرسل تذكيراً أو تكليفاً، وتابع تأكيد الاستلام لكل عضو.',btn('+ تكليف جديد','taskForm()'))+
+       card('سجل التكليفات',`<span class="text-xs text-slate-500">${assignments.length} إسناد</span>`,assignments.length?table(['التكليف','التفاصيل','العضو','تاريخ الإرسال','الاستلام'],assignments.map(task=>`<tr><td class="py-3 pe-4 font-medium">${esc(task.title)}</td><td class="pe-4"><div class="max-w-sm whitespace-pre-wrap">${esc(task.details||'—')}</div></td><td class="pe-4">${esc(task.full_name||task.username)}<div class="text-xs text-slate-500">${esc(task.username)}</div></td><td class="pe-4 text-slate-500">${esc(task.created_at.slice(0,16))}</td><td class="pe-4">${task.confirmed_at?tag('تم التأكيد','green')+`<div class="mt-1 text-xs text-slate-500">${esc(task.confirmed_at.slice(0,16))}</div>`:tag('بانتظار التأكيد','amber')}</td></tr>`).join('')):empty('لا توجد تكليفات مرسلة بعد.'))}
+   else if(TAB==='lists')
+     c.innerHTML=head('القوائم','هذه القوائم تظهر كقوائم اختيار في نماذج الإضافة.')+`<div class="grid gap-4 lg:grid-cols-2">`+LISTS.map(([k,l])=>card(l,'',`<div class="flex flex-wrap gap-2 mb-4">${(LK[k]||[]).map(x=>`<span class="inline-flex items-center gap-2 rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-sm">${esc(x.name)}<button onclick="delLookup(${x.id})" aria-label="حذف" class="text-rose-600">✕</button></span>`).join('')||'<span class="text-sm text-slate-500">لا عناصر.</span>'}</div><div class="flex gap-2"><input id="add_${k}" placeholder="عنصر جديد" onkeydown="event.key==='Enter'&&addLookup('${k}')" class="${INP} !mt-0"/>${btn('إضافة',`addLookup('${k}')`)}</div>`)).join('')+`</div>`;
+   else if(TAB==='backups'){
+     const data=await api('admin/backups'),rows=data.backups.map(b=>`<tr>
+       <td class="py-3 pe-4 font-medium">${esc(b.type)}</td>
+       <td class="pe-4" dir="ltr" style="text-align:start">${esc(new Date(b.created_at).toLocaleString('ar-EG'))}</td>
+       <td class="pe-4">${esc((b.size/1024/1024).toFixed(2))} MB</td>
+       <td class="pe-4"><div class="flex gap-2">${btn('استعادة',`restoreBackup('${esc(b.name)}')`,'danger')}</div></td></tr>`).join('');
+     c.innerHTML=head('النسخ الاحتياطي','نسخة تلقائية يوميًا عند تشغيل الخادم. تُحفظ آخر '+data.retention+' نسخة، ويمكنك إنشاء نسخة فورية قبل أي إجراء مهم.',btn('إنشاء نسخة الآن','createBackup()'))+
+       `<div class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-500/10 dark:text-amber-200">الاستعادة تستبدل بيانات النظام الحالية. ينشئ النظام نسخة أمان من الحالة الحالية قبل الاستعادة، وستحتاج إلى تسجيل الدخول مجددًا بعدها.</div>`+
+       card('النسخ المتاحة',`${data.backups.length} نسخة`,data.backups.length?table(['النوع','تاريخ الإنشاء','الحجم','إجراء'],rows):empty('لم تُنشأ نسخ بعد.'))}
+   else{const u=await api('admin/users');
+     c.innerHTML=head('المستخدمون','المدير: إدارة الحسابات والبيانات. مشغّل البوابة: تسجيل ومتابعة الحركات دون صلاحيات الإدارة.',btn('+ مستخدم جديد','userForm()'))+card('الحسابات','تغيير الصلاحية أو تعطيل الحساب يسري على الجلسات التالية. لا يمكن تعطيل آخر مدير نشط.',table(['الاسم','اسم المستخدم','الصلاحية','الحالة','إجراءات'],u.map(x=>`<tr><td class="py-3 pe-4 font-medium">${esc(x.full_name||'—')}</td><td class="pe-4" dir="ltr" style="text-align:start">${esc(x.username)}</td><td class="pe-4"><select onchange="patchUser(${x.id},{role:this.value})" class="${INP} !mt-0 !w-auto"><option value="operator" ${x.role==='operator'?'selected':''}>مشغّل بوابة</option><option value="admin" ${x.role==='admin'?'selected':''}>مدير النظام</option></select></td><td class="pe-4">${x.active?'مفعّل':'معطّل'}</td><td class="pe-4"><div class="flex gap-2">${btn(x.active?'تعطيل':'تفعيل',`patchUser(${x.id},{active:${x.active?0:1}})`,'ghost')}${btn('إعادة تعيين كلمة المرور',`resetPw(${x.id})`,'ghost')}</div></td></tr>`).join('')))}
+  }catch(e){c.innerHTML=empty('تعذّر التحميل: '+esc(e.message))}
+}
+render();
+</script>
+</body></html>

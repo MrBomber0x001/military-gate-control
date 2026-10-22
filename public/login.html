@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>تسجيل الدخول — التحكم في البوابات</title>
+<link href="/app.css" rel="stylesheet">
+<script>
+if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.classList.add('dark')</script>
+</head>
+<body class="min-h-screen grid place-items-center p-4 bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 font-sans">
+<form id="f" class="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+  <div class="flex items-center gap-3"><div class="grid h-10 w-10 place-items-center rounded-xl bg-brand-600 text-white font-bold">ب</div>
+    <div><h1 id="t" class="font-bold">تسجيل الدخول</h1><p id="s" class="text-xs text-slate-500">التحكم في البوابات</p></div></div>
+  <div id="nameRow" class="hidden"><label class="text-xs font-medium" for="full_name">الاسم الكامل</label><input id="full_name" class="inp"/></div>
+  <div><label class="text-xs font-medium" for="username">اسم المستخدم</label><input id="username" dir="ltr" autocomplete="username" required class="inp"/></div>
+  <div><label class="text-xs font-medium" for="password">كلمة المرور</label><input id="password" type="password" dir="ltr" autocomplete="current-password" required class="inp"/></div>
+  <div id="confRow" class="hidden"><label class="text-xs font-medium" for="confirm">تأكيد كلمة المرور</label><input id="confirm" type="password" dir="ltr" autocomplete="new-password" class="inp"/></div>
+  <p id="err" role="alert" class="hidden text-sm text-rose-600"></p>
+  <button id="btn" class="w-full rounded-xl bg-brand-600 hover:bg-brand-700 text-white py-2 text-sm font-semibold">دخول</button>
+</form>
+<style>.inp{margin-top:.25rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:transparent;padding:.5rem .75rem;font-size:.875rem}.dark .inp{border-color:#334155}</style>
+<script>
+let setup=false;const $=id=>document.getElementById(id);
+fetch('/api/auth/status').then(r=>r.json()).then(s=>{setup=s.needsSetup;if(!setup)return;
+  $('t').textContent='إعداد النظام لأول مرة';$('s').textContent='هذا الحساب سيكون مدير النظام';$('btn').textContent='إنشاء حساب المدير';
+  $('nameRow').classList.remove('hidden');$('confRow').classList.remove('hidden');$('confirm').required=true;$('password').autocomplete='new-password'});
+$('f').addEventListener('submit',async e=>{e.preventDefault();const err=$('err');err.classList.add('hidden');
+  if(setup&&$('password').value!==$('confirm').value){err.textContent='كلمتا المرور غير متطابقتين';err.classList.remove('hidden');return}
+  const body={username:$('username').value,password:$('password').value,full_name:$('full_name').value};
+  const r=await fetch('/api/auth/'+(setup?'setup':'login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok)location.href=setup?'/admin.html':'/';else{err.textContent=j.error||'حدث خطأ';err.classList.remove('hidden')}});
+</script>
+</body></html>

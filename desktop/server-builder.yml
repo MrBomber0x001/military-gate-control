@@ -1,0 +1,32 @@
+appId: com.gatecontrol.server
+productName: Gate Control Server
+extraMetadata:
+  main: desktop/server-main.js
+directories:
+  output: release-server
+npmRebuild: false
+files:
+  - desktop/server-main.js
+  - desktop/server-preload.js
+  - desktop/server-runner.js
+  - desktop/server-status.html
+  - desktop/server-status.js
+  - server.js
+  - public/**/*
+  - package.json
+asarUnpack:
+  - desktop/server-runner.js
+  - server.js
+  - public/**/*
+  - node_modules/**/*
+  - node_modules/iconv-lite/lib/**/*
+  - node_modules/iconv-lite/encodings/**/*
+extraResources:
+  - from: node_modules/node/bin/node.exe
+    to: node-runtime/node.exe
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  artifactName: Gate-Control-Server-${version}.${ext}

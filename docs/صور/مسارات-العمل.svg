@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="680" viewBox="0 0 1100 680" role="img" aria-labelledby="title desc">
+  <title id="title">مسارات العمل اليومية</title>
+  <desc id="desc">مخطط يوضح تسجيل الأفراد والإجازات والزيارات والعيادات والفرق ثم مراجعة التقرير والإقفال اليومي.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#64748b"/>
+    </marker>
+    <style>
+      text{font-family:Tahoma,Arial,sans-serif;fill:#0f172a}
+      .title{font-size:28px;font-weight:700}
+      .label{font-size:18px;font-weight:700}
+      .small{font-size:15px;fill:#475569}
+      .box{stroke-width:2;rx:16}
+      .link{fill:none;stroke:#64748b;stroke-width:3;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1100" height="680" fill="#f8fafc"/>
+  <text x="550" y="54" text-anchor="middle" class="title">مسارات العمل اليومية في التحكم بالبوابات</text>
+  <rect x="400" y="90" width="300" height="76" class="box" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="550" y="122" text-anchor="middle" class="label">اختر التاريخ وسجّل الوقائع</text>
+  <text x="550" y="148" text-anchor="middle" class="small">استخدم حسابك الشخصي</text>
+  <path d="M550 166v35M150 201h800M150 201v34M420 201v34M690 201v34M950 201v34" class="link"/>
+
+  <rect x="50" y="235" width="200" height="100" class="box" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="150" y="274" text-anchor="middle" class="label">الأفراد</text>
+  <text x="150" y="302" text-anchor="middle" class="small">دخول ← وجود ← خروج</text>
+  <rect x="320" y="235" width="200" height="100" class="box" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="420" y="274" text-anchor="middle" class="label">الإجازات</text>
+  <text x="420" y="302" text-anchor="middle" class="small">مغادرة ← تأكيد العودة</text>
+  <rect x="590" y="235" width="200" height="100" class="box" fill="#fce7f3" stroke="#ec4899"/>
+  <text x="690" y="274" text-anchor="middle" class="label">الزيارات والعيادات</text>
+  <text x="690" y="302" text-anchor="middle" class="small">تسجيل الحدث ← إغلاقه</text>
+  <rect x="850" y="235" width="200" height="100" class="box" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="950" y="274" text-anchor="middle" class="label">الفرق</text>
+  <text x="950" y="302" text-anchor="middle" class="small">حضور / غياب / إجازة</text>
+
+  <path d="M150 335v67h400M420 335v67M690 335v67M950 335v67H550" class="link"/>
+  <rect x="375" y="402" width="350" height="88" class="box" fill="#e0f2fe" stroke="#0ea5e9"/>
+  <text x="550" y="438" text-anchor="middle" class="label">راجع الحركات المفتوحة</text>
+  <text x="550" y="466" text-anchor="middle" class="small">تأكد من العودة أو الخروج الفعلي</text>
+  <path d="M550 490v45" class="link"/>
+  <rect x="350" y="535" width="400" height="90" class="box" fill="#e2e8f0" stroke="#475569"/>
+  <text x="550" y="571" text-anchor="middle" class="label">اطبع التقرير اليومي وسجّل التسليم</text>
+  <text x="550" y="599" text-anchor="middle" class="small">صحّح التاريخ/الوقت عند الحاجة وبصلاحيتك</text>
+</svg>

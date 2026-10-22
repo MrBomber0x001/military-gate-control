@@ -1,0 +1,10 @@
+node_modules/
+*.db-*
+*.db!
+*.db-wal
+gate.db-wal
+release/
+release-server/
+
+data/
+backups/

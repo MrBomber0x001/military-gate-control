@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@source "./public";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: Cairo, Tahoma, Arial, sans-serif;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe7fe;
+  --color-brand-500: #3b6fe0;
+  --color-brand-600: #2f5bc4;
+  --color-brand-700: #26499e;
+}
+
+@font-face {
+  font-family: Cairo;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/cairo-400.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: Cairo;
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cairo-600.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: Cairo;
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/cairo-700.ttf") format("truetype");
+}
