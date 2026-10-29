@@ -16,6 +16,7 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, full_name TEXT, role TEXT NOT NULL DEFAULT 'operator', active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS user_groups(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, permissions_json TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS lookups(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, name TEXT NOT NULL, UNIQUE(kind,name));
 CREATE TABLE IF NOT EXISTS personnel(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, mid TEXT UNIQUE NOT NULL, rank TEXT, unit TEXT, phone TEXT, inside INTEGER NOT NULL DEFAULT 0, retired INTEGER NOT NULL DEFAULT 0);
@@ -45,13 +46,15 @@ const RK = Object.fromEntries(RANKS.map(r => [r.name, r]));
 db.exec(`
 CREATE TABLE IF NOT EXISTS attendance(date TEXT NOT NULL, person_id INTEGER NOT NULL REFERENCES personnel(id) ON DELETE CASCADE, by TEXT, PRIMARY KEY(date, person_id));
 CREATE TABLE IF NOT EXISTS duty(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, notes TEXT, by TEXT);
-CREATE TABLE IF NOT EXISTS missions(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, dest TEXT NOT NULL, purpose TEXT, notes TEXT, start_date TEXT NOT NULL, start_ts TEXT, end_ts TEXT, status TEXT NOT NULL DEFAULT 'active', by TEXT);
+CREATE TABLE IF NOT EXISTS missions(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, dest TEXT NOT NULL, purpose TEXT, notes TEXT, start_date TEXT NOT NULL, start_ts TEXT, end_ts TEXT, status TEXT NOT NULL DEFAULT 'active', by TEXT, security_enabled INTEGER NOT NULL DEFAULT 0, security_personnel_count INTEGER NOT NULL DEFAULT 0, security_personnel_details TEXT NOT NULL DEFAULT '', weapon_serial TEXT NOT NULL DEFAULT '', live_ammo_count INTEGER NOT NULL DEFAULT 0, blank_ammo_count INTEGER NOT NULL DEFAULT 0, security_has_vehicle INTEGER NOT NULL DEFAULT 0, security_vehicle_details TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, date TEXT NOT NULL, notes TEXT, by TEXT);
 CREATE TABLE IF NOT EXISTS purchase_lines(id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE, item TEXT NOT NULL, price_cents INTEGER NOT NULL, qty INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_pur_date ON purchases(date);
 CREATE TABLE IF NOT EXISTS clinics(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, case_details TEXT NOT NULL, hospital TEXT, start_ts TEXT NOT NULL, end_ts TEXT, status TEXT NOT NULL DEFAULT 'active', by TEXT);
 CREATE TABLE IF NOT EXISTS leaves(id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL, person TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, reason TEXT, by TEXT, expected_return_at TEXT, departed_at TEXT, returned_at TEXT);
-CREATE TABLE IF NOT EXISTS visitors(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, rank TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', unit TEXT NOT NULL DEFAULT '', enter_ts TEXT NOT NULL, exit_ts TEXT, by TEXT);
+CREATE TABLE IF NOT EXISTS leave_return_events(id INTEGER PRIMARY KEY AUTOINCREMENT, leave_id INTEGER NOT NULL REFERENCES leaves(id) ON DELETE CASCADE, due_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', notified_at TEXT NOT NULL, confirmed_at TEXT, confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL, expected_return_at TEXT, UNIQUE(leave_id,due_at));
+CREATE TABLE IF NOT EXISTS visitors(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, rank TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', unit TEXT NOT NULL DEFAULT '', enter_ts TEXT NOT NULL, exit_ts TEXT, by TEXT, has_valuables INTEGER NOT NULL DEFAULT 0, valuables_details TEXT NOT NULL DEFAULT '', has_vehicle INTEGER NOT NULL DEFAULT 0, vehicle_details TEXT NOT NULL DEFAULT '', has_companions INTEGER NOT NULL DEFAULT 0, companion_count INTEGER NOT NULL DEFAULT 0, companion_details TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS saved_people(kind TEXT NOT NULL, name TEXT NOT NULL COLLATE NOCASE, rank TEXT NOT NULL, PRIMARY KEY(kind,name));
 CREATE TABLE IF NOT EXISTS squads(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, by TEXT);
 CREATE TABLE IF NOT EXISTS squad_members(squad_id INTEGER NOT NULL REFERENCES squads(id) ON DELETE CASCADE, person_id INTEGER NOT NULL REFERENCES personnel(id) ON DELETE CASCADE, PRIMARY KEY(squad_id, person_id));
 CREATE TABLE IF NOT EXISTS squad_attendance(id INTEGER PRIMARY KEY AUTOINCREMENT, squad_id INTEGER NOT NULL, person_id INTEGER NOT NULL, date TEXT NOT NULL, enter_ts TEXT NOT NULL, exit_ts TEXT, by TEXT, UNIQUE(squad_id, person_id, date), FOREIGN KEY(squad_id, person_id) REFERENCES squad_members(squad_id, person_id) ON DELETE CASCADE);
@@ -87,6 +90,7 @@ if (!notificationColumns.has('title')) db.exec("ALTER TABLE notifications ADD CO
 if (!notificationColumns.has('body')) db.exec("ALTER TABLE notifications ADD COLUMN body TEXT NOT NULL DEFAULT ''");
 if (!notificationColumns.has('related_id')) db.exec('ALTER TABLE notifications ADD COLUMN related_id INTEGER');
 const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+if (!columns('users').includes('group_id')) db.exec('ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES user_groups(id) ON DELETE SET NULL');
 if (!columns('vehicles').includes('companion_id')) db.exec('ALTER TABLE vehicles ADD COLUMN companion_id INTEGER REFERENCES personnel(id) ON DELETE SET NULL');
 if (!columns('personnel').includes('retired')) db.exec('ALTER TABLE personnel ADD COLUMN retired INTEGER NOT NULL DEFAULT 0');
 if (!columns('visitors').includes('reason')) db.exec("ALTER TABLE visitors ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
@@ -98,14 +102,74 @@ if (!columns('leaves').includes('expected_return_at')) db.exec('ALTER TABLE leav
 if (!columns('leaves').includes('departed_at')) db.exec('ALTER TABLE leaves ADD COLUMN departed_at TEXT');
 if (!columns('leaves').includes('returned_at')) db.exec('ALTER TABLE leaves ADD COLUMN returned_at TEXT');
 if (!columns('missions').includes('start_ts')) db.exec('ALTER TABLE missions ADD COLUMN start_ts TEXT');
+for (const [name, definition] of Object.entries({
+  security_enabled: 'INTEGER NOT NULL DEFAULT 0',
+  security_personnel_count: 'INTEGER NOT NULL DEFAULT 0',
+  security_personnel_details: "TEXT NOT NULL DEFAULT ''",
+  weapon_serial: "TEXT NOT NULL DEFAULT ''",
+  live_ammo_count: 'INTEGER NOT NULL DEFAULT 0',
+  blank_ammo_count: 'INTEGER NOT NULL DEFAULT 0',
+  security_has_vehicle: 'INTEGER NOT NULL DEFAULT 0',
+  security_vehicle_details: "TEXT NOT NULL DEFAULT ''",
+  security_vehicle_type: "TEXT NOT NULL DEFAULT ''",
+  security_vehicle_plate: "TEXT NOT NULL DEFAULT ''",
+})) if (!columns('missions').includes(name)) db.exec(`ALTER TABLE missions ADD COLUMN ${name} ${definition}`);
+for (const [name, definition] of Object.entries({
+  has_valuables: 'INTEGER NOT NULL DEFAULT 0',
+  valuables_details: "TEXT NOT NULL DEFAULT ''",
+  has_vehicle: 'INTEGER NOT NULL DEFAULT 0',
+  vehicle_details: "TEXT NOT NULL DEFAULT ''",
+  vehicle_type: "TEXT NOT NULL DEFAULT ''",
+  vehicle_plate: "TEXT NOT NULL DEFAULT ''",
+  has_companions: 'INTEGER NOT NULL DEFAULT 0',
+  companion_count: 'INTEGER NOT NULL DEFAULT 0',
+  companion_details: "TEXT NOT NULL DEFAULT ''",
+})) if (!columns('visitors').includes(name)) db.exec(`ALTER TABLE visitors ADD COLUMN ${name} ${definition}`);
 db.exec("UPDATE missions SET start_ts=start_date || ' 00:00:00' WHERE start_ts IS NULL");
 // cleanup of the old canteen / rank-list data (ranks are now fixed in code)
 db.exec("DELETE FROM movements WHERE kind='canteen'; DELETE FROM lookups WHERE kind IN ('rank','item_category');");
+const APP_MODULES = [
+  ['dashboard', 'لوحة العمليات'], ['tasks', 'التكليفات'], ['personnel', 'الأفراد'],
+  ['clinics', 'العيادات'], ['leaves', 'الإجازات'], ['absences', 'الغياب'],
+  ['visitors', 'الزيارات'], ['correspondence', 'المكاتبات'], ['squads', 'الفرق'],
+  ['vehicles', 'المركبات'], ['duty', 'النوبتجية'], ['missions', 'المأموريات'],
+  ['purchases', 'المشتريات'], ['movements', 'سجل الحركة'], ['reports', 'التقارير'],
+];
+const allModulePermissions = () => Object.fromEntries(APP_MODULES.map(([key]) => [key, { read: true, write: true }]));
+db.prepare('INSERT OR IGNORE INTO user_groups(name,permissions_json,is_default) VALUES (?,?,1)')
+  .run('مشغّل عام', JSON.stringify(allModulePermissions()));
+const defaultGroupId = db.prepare('SELECT id FROM user_groups WHERE is_default=1').get().id;
+db.prepare("UPDATE users SET group_id=? WHERE role='operator' AND group_id IS NULL").run(defaultGroupId);
+db.exec('CREATE INDEX IF NOT EXISTS idx_leave_return_events_leave ON leave_return_events(leave_id,id DESC)');
 
 // ---------- helpers ----------
 const pad = n => String(n).padStart(2, '0');
 const now = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 const day = d => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : now().slice(0, 10));
+const nonNegativeCount = value => {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const count = Number(text);
+  return Number.isInteger(count) && count >= 0 && count <= 10000 ? count : null;
+};
+function savedPeopleOf(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) return null;
+  const people = [];
+  const names = new Set();
+  for (const person of value) {
+    const name = String(person?.name || '').trim(), rank = String(person?.rank || '').trim();
+    const key = name.toLocaleLowerCase();
+    if (!name || name.length > 120 || !RK[rank] || names.has(key)) return null;
+    names.add(key);
+    people.push({ name, rank });
+  }
+  return people;
+}
+const savePeople = db.prepare(`INSERT INTO saved_people(kind,name,rank) VALUES (?,?,?)
+  ON CONFLICT(kind,name) DO UPDATE SET rank=excluded.rank`);
+function rememberPeople(kind, people) {
+  for (const person of people) savePeople.run(kind, person.name, person.rank);
+}
 const DUTY_ROLES = {
   general: 'نوبتجي',
   assistant_officer: 'مساعد ظابط نباطشي',
@@ -120,7 +184,14 @@ const verify = (p, st) => { const [s, h] = st.split(':'), a = crypto.scryptSync(
 const okPw = p => typeof p === 'string' && p.length >= 8;
 const okUser = u => /^[a-z0-9_.-]{3,32}$/.test(u);
 const cookie = (req, n) => ((req.headers.cookie || '').split(';').map(s => s.trim().split('=')).find(a => a[0] === n) || [])[1];
-const publicUser = u => ({ id: u.id, username: u.username, full_name: u.full_name, role: u.role });
+const publicUser = u => {
+  const group = u.group_id && db.prepare('SELECT id,name,permissions_json FROM user_groups WHERE id=?').get(u.group_id);
+  const permissions = group ? JSON.parse(group.permissions_json) : {};
+  return {
+    id: u.id, username: u.username, full_name: u.full_name, role: u.role,
+    group_id: group?.id || null, group_name: group?.name || null, permissions,
+  };
+};
 const timestampForFile = date => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 const backupName = (kind, date = new Date()) => `gate-${timestampForFile(date)}-${kind}.db`;
 const backupPath = name => path.join(BACKUP_DIR, name);
@@ -254,7 +325,55 @@ app.post('/api/auth/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'); res.json({ ok: true });
 });
 
-app.use('/api', requireAuth);
+function moduleForApiPath(pathname, req) {
+  const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+  if (pathname === '/api/attendance') return 'personnel';
+  if (pathname === '/api/saved-people')
+    return query.get('kind') === 'mission_security' ? 'missions' : query.get('kind') === 'visitor_companion' ? 'visitors' : 'personnel';
+  if (pathname === '/api/export.csv') return query.get('kind') === 'purchases' ? 'purchases' : 'movements';
+  const recordEdit = pathname.match(/^\/api\/records\/(personnel|vehicle|movement|mission|clinic|leave|visitor|squad)\//);
+  if (recordEdit) return ({ vehicle: 'vehicles' })[recordEdit[1]] || recordEdit[1] + (recordEdit[1] === 'personnel' ? '' : 's');
+  const moduleRoutes = [
+    [/^\/api\/(?:dashboard|handovers)(?:\/|$)/, 'dashboard'],
+    [/^\/api\/tasks(?:\/|$)/, 'tasks'],
+    [/^\/api\/personnel(?:\/|$)/, 'personnel'],
+    [/^\/api\/clinics(?:\/|$)/, 'clinics'],
+    [/^\/api\/leaves(?:\/|$)/, 'leaves'],
+    [/^\/api\/absences(?:\/|$)/, 'absences'],
+    [/^\/api\/visitors(?:\/|$)/, 'visitors'],
+    [/^\/api\/correspondence(?:\/|$)/, 'correspondence'],
+    [/^\/api\/squads(?:\/|$)/, 'squads'],
+    [/^\/api\/vehicles(?:\/|$)/, 'vehicles'],
+    [/^\/api\/duty(?:\/|$)/, 'duty'],
+    [/^\/api\/missions(?:\/|$)/, 'missions'],
+    [/^\/api\/purchases(?:\/|$)/, 'purchases'],
+    [/^\/api\/movements(?:\/|$)/, 'movements'],
+    [/^\/api\/reports(?:\/|$)/, 'reports'],
+  ];
+  for (const [pattern, module] of moduleRoutes) {
+    const match = pathname.match(pattern);
+    if (match) return typeof module === 'function' ? module(...match) : module;
+  }
+  return null;
+}
+const groupAuthorization = (req, res, next) => {
+  const pathname = new URL(req.originalUrl, 'http://localhost').pathname;
+  if (req.user.role === 'admin' || /^\/api\/leaves\/return-events\/\d+\/decision$/.test(pathname)) return next();
+  const module = moduleForApiPath(pathname, req);
+  if (!module) return next();
+  const group = req.user.group_id && db.prepare('SELECT permissions_json FROM user_groups WHERE id=?').get(req.user.group_id);
+  let permissions = {};
+  try { if (group) permissions = JSON.parse(group.permissions_json); }
+  catch (error) {
+    console.error(`Unable to load permissions for user ${req.user.id}:`, error);
+    return res.status(500).json({ error: 'تعذر تحميل صلاحيات المجموعة' });
+  }
+  const operation = ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? 'read' : 'write';
+  return permissions[module]?.[operation] === true
+    ? next()
+    : res.status(403).json({ error: 'لا تملك صلاحية تنفيذ هذا الإجراء في هذا القسم' });
+};
+app.use('/api', requireAuth, groupAuthorization);
 app.get('/api/me', (req, res) => res.json(publicUser(req.user)));
 
 function mutationDescription(req) {
@@ -287,14 +406,11 @@ function mutationDescription(req) {
     type = 'system'; action = 'إنشاء نسخة احتياطية';
   } else if (/^\/api\/admin\/backups\/[^/]+\/restore$/.test(pathname)) {
     type = 'system'; action = 'استعادة نسخة احتياطية';
-  } else if (pathname === '/api/auth/change-password') {
-    type = 'user'; action = 'تغيير كلمة المرور'; target = req.user.username;
+
   } else if ((match = pathname.match(/^\/api\/(personnel|vehicles)\/(\d+)\/toggle$/))) {
     type = match[1] === 'personnel' ? 'personnel' : 'vehicle';
     const row = db.prepare(`SELECT ${match[1] === 'personnel' ? 'name' : 'plate'} AS name, inside FROM ${match[1]} WHERE id=?`).get(match[2]);
     action = row?.inside ? 'تسجيل خروج' : 'تسجيل دخول'; target = row?.name || '';
-  } else if (pathname === '/api/vehicles/manual-movement') {
-    type = 'vehicle'; action = req.body.type === 'OUT' ? 'خروج مركبة زائرة' : 'دخول مركبة زائرة'; target = label(req.body.plate);
   } else if (pathname === '/api/attendance') {
     type = 'attendance'; action = req.body.present ? 'تسجيل تمام' : 'إلغاء تمام';
     const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger).slice(0, 2000);
@@ -346,17 +462,6 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.post('/api/auth/change-password', (req, res) => {
-  const currentPassword = String(req.body.current_password || '');
-  const newPassword = String(req.body.new_password || '');
-  if (!verify(currentPassword, req.user.pass)) return res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
-  if (!okPw(newPassword)) return res.status(400).json({ error: 'كلمة المرور الجديدة يجب أن تكون ٨ أحرف على الأقل' });
-  const token = cookie(req, 'sid');
-  db.prepare('UPDATE users SET pass=? WHERE id=?').run(hash(newPassword), req.user.id);
-  db.prepare('DELETE FROM sessions WHERE user_id=? AND token<>?').run(req.user.id, sha(token));
-  res.json({ ok: true });
-});
-
 app.get('/api/admin/notifications', admin, (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   res.json({
@@ -375,18 +480,18 @@ app.post('/api/admin/notifications/read-all', admin, (req, res) => {
 app.get('/api/notifications', (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   res.json({
-    unread: db.prepare("SELECT COUNT(*) AS count FROM notifications WHERE recipient_id=? AND type IN ('member_message','correspondence_message') AND read_at IS NULL").get(req.user.id).count,
+    unread: db.prepare("SELECT COUNT(*) AS count FROM notifications WHERE recipient_id=? AND type IN ('member_message','correspondence_message','soldier_return_due') AND read_at IS NULL").get(req.user.id).count,
     items: db.prepare(`SELECT id,actor_name,type,summary,title,body,related_id,created_at,read_at
-      FROM notifications WHERE recipient_id=? AND type IN ('member_message','correspondence_message') ORDER BY id DESC LIMIT ?`).all(req.user.id, limit),
+      FROM notifications WHERE recipient_id=? AND type IN ('member_message','correspondence_message','soldier_return_due') ORDER BY id DESC LIMIT ?`).all(req.user.id, limit),
   });
 });
 app.post('/api/notifications/:id/read', (req, res) => {
-  db.prepare("UPDATE notifications SET read_at=? WHERE id=? AND recipient_id=? AND type IN ('member_message','correspondence_message') AND read_at IS NULL")
+  db.prepare("UPDATE notifications SET read_at=? WHERE id=? AND recipient_id=? AND type IN ('member_message','correspondence_message','soldier_return_due') AND read_at IS NULL")
     .run(now(), req.params.id, req.user.id);
   res.json({ ok: true });
 });
 app.post('/api/notifications/read-all', (req, res) => {
-  db.prepare("UPDATE notifications SET read_at=? WHERE recipient_id=? AND type IN ('member_message','correspondence_message') AND read_at IS NULL")
+  db.prepare("UPDATE notifications SET read_at=? WHERE recipient_id=? AND type IN ('member_message','correspondence_message','soldier_return_due') AND read_at IS NULL")
     .run(now(), req.user.id);
   res.json({ ok: true });
 });
@@ -842,13 +947,179 @@ app.delete('/api/admin/:e(personnel|vehicles)/:id', admin, (req, res) => {
   db.prepare(`DELETE FROM ${req.params.e} WHERE id=?`).run(req.params.id); res.json({ ok: true });
 });
 
+const PERSONNEL_IMPORT_HEADERS = {
+  name: ['name', 'fullname', 'personname', 'الاسم', 'اسمالفرد', 'الاسمالثلاثي', 'الاسمكاملا'],
+  mid: ['mid', 'militaryid', 'militarynumber', 'servicenumber', 'idnumber', 'الرقمالعسكري', 'الرقمالعسكرى', 'الرقمالوظيفي', 'رقمالخدمة'],
+  rank: ['rank', 'title', 'الرتبة', 'الرتبه', 'الصفة', 'الرتبةوالصفة'],
+  unit: ['unit', 'department', 'الوحدة', 'الوحده', 'الفرقة', 'الفرقه', 'القسم'],
+  phone: ['phone', 'mobile', 'telephone', 'الهاتف', 'رقمالهاتف', 'الموبايل', 'التليفون'],
+  retired: ['retired', 'isretired', 'متقاعد', 'ضابطمتقاعد'],
+};
+const normalizePersonnelImportHeader = value => String(value ?? '')
+  .normalize('NFKC').toLocaleLowerCase().replace(/[\s_\-./\\()［］[\]{}:：]+/g, '');
+async function readPersonnelImportRows(fileName, data) {
+  if (typeof data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length > 14 * 1024 * 1024)
+    throw new Error('الملف غير صالح أو أكبر من الحد المسموح (١٠ ميجابايت)');
+  const buffer = Buffer.from(data, 'base64');
+  if (!buffer.length || buffer.length > 10 * 1024 * 1024)
+    throw new Error('الملف فارغ أو أكبر من الحد المسموح (١٠ ميجابايت)');
+  const extension = path.extname(String(fileName || '')).toLowerCase();
+  const workbook = new ExcelJS.Workbook();
+  if (extension === '.xlsx') await workbook.xlsx.load(buffer);
+  else if (extension === '.csv') await workbook.csv.read(require('stream').Readable.from([buffer]));
+  else throw new Error('صيغة الملف غير مدعومة؛ استخدم Excel ‏(.xlsx) أو CSV ‏(.csv)');
+  const sheet = workbook.worksheets[0];
+  if (!sheet || sheet.rowCount < 2) throw new Error('الملف لا يحتوي على عناوين وأفراد');
+  if (sheet.rowCount > 5001) throw new Error('الحد الأقصى للاستيراد ٥٠٠٠ فرد في المرة الواحدة');
+  const headerRow = sheet.getRow(1);
+  const headerIndexes = new Map();
+  for (let column = 1; column <= headerRow.cellCount; column++) {
+    const header = normalizePersonnelImportHeader(headerRow.getCell(column).text);
+    if (!header) continue;
+    for (const [field, aliases] of Object.entries(PERSONNEL_IMPORT_HEADERS)) {
+      if (aliases.includes(header)) headerIndexes.set(field, column);
+    }
+  }
+  if (!headerIndexes.has('name') || !headerIndexes.has('mid') || !headerIndexes.has('rank'))
+    throw new Error('يجب أن يحتوي الصف الأول على أعمدة الاسم والرقم العسكري والرتبة');
+  const rows = [];
+  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
+    const row = sheet.getRow(rowNumber);
+    const value = field => headerIndexes.has(field) ? String(row.getCell(headerIndexes.get(field)).text ?? '').trim() : '';
+    const record = {
+      name: value('name'), mid: value('mid'), rank: value('rank'),
+      unit: value('unit'), phone: value('phone'),
+      retired: value('retired'),
+    };
+    if (Object.values(record).every(value => !value)) continue;
+    rows.push({ row: rowNumber, record });
+  }
+  if (!rows.length) throw new Error('لا توجد بيانات أفراد للاستيراد');
+  return rows;
+}
+function validatePersonnelImport(rows) {
+  const seen = new Set(), existing = new Set(
+    db.prepare('SELECT mid FROM personnel').all().map(row => String(row.mid).toLocaleLowerCase())
+  );
+  return rows.map(({ row, record }) => {
+    const duplicate = existing.has(record.mid.toLocaleLowerCase()) || seen.has(record.mid.toLocaleLowerCase());
+    seen.add(record.mid.toLocaleLowerCase());
+    if (duplicate) return { row, record, status: 'duplicate', error: 'الرقم العسكري مسجل بالفعل أو مكرر في الملف' };
+    const retiredText = normalizePersonnelImportHeader(record.retired);
+    if (record.retired) {
+      if (['نعم', 'yes', 'true', '1', 'متقاعد', 'ضابطمتقاعد'].includes(retiredText)) record.retired = '1';
+      else if (['لا', 'no', 'false', '0', 'غيرمتقاعد'].includes(retiredText)) record.retired = '0';
+      else return { row, record, status: 'invalid', error: 'قيمة المتقاعد يجب أن تكون نعم أو لا' };
+    }
+    const result = clean('personnel', record, true);
+    if (result.error) return { row, record, status: 'invalid', error: result.error };
+    return { row, record: result.o, status: 'ready' };
+  });
+}
+app.post('/api/admin/personnel/import/preview', admin, async (req, res, next) => {
+  try {
+    const sourceRows = await readPersonnelImportRows(req.body.file_name, req.body.file_data);
+    const rows = validatePersonnelImport(sourceRows);
+    res.json({
+      rows: rows.slice(0, 100),
+      total: rows.length,
+      ready: rows.filter(row => row.status === 'ready').length,
+      duplicates: rows.filter(row => row.status === 'duplicate').length,
+      invalid: rows.filter(row => row.status === 'invalid').length,
+    });
+  } catch (error) {
+    if (error instanceof Error && !error.code) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+app.post('/api/admin/personnel/import', admin, async (req, res, next) => {
+  try {
+    const sourceRows = await readPersonnelImportRows(req.body.file_name, req.body.file_data);
+    const rows = validatePersonnelImport(sourceRows);
+    const ready = rows.filter(row => row.status === 'ready');
+    const insert = db.prepare(`INSERT OR IGNORE INTO personnel(name,mid,rank,retired,unit,phone)
+      VALUES (@name,@mid,@rank,@retired,@unit,@phone)`);
+    const result = db.transaction(() => ready.map(row => insert.run(row.record)))();
+    const imported = result.reduce((total, item) => total + item.changes, 0);
+    res.json({
+      imported,
+      duplicates: rows.filter(row => row.status === 'duplicate').length + result.length - imported,
+      invalid: rows.filter(row => row.status === 'invalid').length,
+      total: rows.length,
+    });
+  } catch (error) {
+    if (error instanceof Error && !error.code) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
 // ---------- admin: users ----------
-app.get('/api/admin/users', admin, (q, res) => res.json(db.prepare('SELECT id,username,full_name,role,active FROM users ORDER BY id').all()));
+function normalizeGroupPermissions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const permissions = {};
+  for (const [key] of APP_MODULES) {
+    const item = value[key] || {};
+    if (typeof item !== 'object' || Array.isArray(item) ||
+        (item.read != null && typeof item.read !== 'boolean') ||
+        (item.write != null && typeof item.write !== 'boolean')) return null;
+    const write = item.write === true;
+    permissions[key] = { read: item.read === true || write, write };
+  }
+  return permissions;
+}
+app.get('/api/admin/groups', admin, (req, res) => {
+  const groups = db.prepare(`SELECT g.id,g.name,g.permissions_json,g.is_default,COUNT(u.id) AS member_count
+    FROM user_groups g LEFT JOIN users u ON u.group_id=g.id
+    GROUP BY g.id ORDER BY g.is_default DESC,g.name COLLATE NOCASE`).all();
+  res.json(groups.map(group => ({
+    id: group.id, name: group.name, permissions: JSON.parse(group.permissions_json),
+    is_default: group.is_default, member_count: group.member_count,
+  })));
+});
+app.post('/api/admin/groups', admin, (req, res) => {
+  const name = String(req.body.name || '').trim(), permissions = normalizeGroupPermissions(req.body.permissions);
+  if (!name || name.length > 60 || !permissions) return res.status(400).json({ error: 'أدخل اسم مجموعة صحيحاً وحدد صلاحياتها' });
+  try {
+    const result = db.prepare('INSERT INTO user_groups(name,permissions_json) VALUES (?,?)').run(name, JSON.stringify(permissions));
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'اسم المجموعة مستخدم بالفعل' });
+    throw error;
+  }
+});
+app.put('/api/admin/groups/:id', admin, (req, res) => {
+  const id = Number(req.params.id), name = String(req.body.name || '').trim(), permissions = normalizeGroupPermissions(req.body.permissions);
+  if (!Number.isInteger(id) || !name || name.length > 60 || !permissions)
+    return res.status(400).json({ error: 'أدخل اسم مجموعة صحيحاً وحدد صلاحياتها' });
+  try {
+    const result = db.prepare('UPDATE user_groups SET name=?,permissions_json=? WHERE id=?')
+      .run(name, JSON.stringify(permissions), id);
+    if (!result.changes) return res.status(404).json({ error: 'المجموعة غير موجودة' });
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'اسم المجموعة مستخدم بالفعل' });
+    throw error;
+  }
+});
+app.delete('/api/admin/groups/:id', admin, (req, res) => {
+  const group = db.prepare('SELECT id,is_default FROM user_groups WHERE id=?').get(req.params.id);
+  if (!group) return res.status(404).json({ error: 'المجموعة غير موجودة' });
+  if (group.is_default) return res.status(409).json({ error: 'لا يمكن حذف المجموعة الافتراضية' });
+  if (db.prepare('SELECT 1 FROM users WHERE group_id=?').get(group.id))
+    return res.status(409).json({ error: 'انقل المستخدمين إلى مجموعة أخرى قبل حذف هذه المجموعة' });
+  db.prepare('DELETE FROM user_groups WHERE id=?').run(group.id);
+  res.json({ ok: true });
+});
+app.get('/api/admin/users', admin, (q, res) => res.json(db.prepare(`SELECT u.id,u.username,u.full_name,u.role,u.active,u.group_id,g.name AS group_name
+  FROM users u LEFT JOIN user_groups g ON g.id=u.group_id ORDER BY u.id`).all()));
 app.post('/api/admin/users', admin, (req, res) => {
   const u = String(req.body.username || '').trim().toLowerCase(), role = req.body.role === 'admin' ? 'admin' : 'operator';
+  const groupId = role === 'operator' ? Number(req.body.group_id || defaultGroupId) : null;
+  if (role === 'operator' && !db.prepare('SELECT 1 FROM user_groups WHERE id=?').get(groupId))
+    return res.status(400).json({ error: 'اختر مجموعة مستخدمين صحيحة' });
   if (!okUser(u)) return res.status(400).json({ error: 'اسم المستخدم: ٣–٣٢ حرفاً إنجليزياً أو أرقاماً' });
   if (!okPw(req.body.password)) return res.status(400).json({ error: 'كلمة المرور ٨ أحرف على الأقل' });
-  try { db.prepare('INSERT INTO users(username,pass,full_name,role) VALUES (?,?,?,?)').run(u, hash(req.body.password), String(req.body.full_name || '').trim(), role); res.json({ ok: true }); }
+  try { db.prepare('INSERT INTO users(username,pass,full_name,role,group_id) VALUES (?,?,?,?,?)').run(u, hash(req.body.password), String(req.body.full_name || '').trim(), role, groupId); res.json({ ok: true }); }
   catch { res.status(409).json({ error: 'اسم المستخدم مستخدم مسبقاً' }); }
 });
 app.put('/api/admin/users/:id', admin, (req, res) => {
@@ -857,26 +1128,57 @@ app.put('/api/admin/users/:id', admin, (req, res) => {
   if (b.role != null && !['admin', 'operator'].includes(b.role)) return res.status(400).json({ error: 'الصلاحية غير صحيحة' });
   if (b.active != null && ![0, 1, true, false].includes(b.active)) return res.status(400).json({ error: 'حالة الحساب غير صحيحة' });
   const role = b.role == null ? t.role : b.role, active = b.active == null ? t.active : (b.active ? 1 : 0);
+  const groupId = role === 'operator' ? Number(b.group_id == null ? t.group_id || defaultGroupId : b.group_id) : null;
+  if (role === 'operator' && !db.prepare('SELECT 1 FROM user_groups WHERE id=?').get(groupId))
+    return res.status(400).json({ error: 'اختر مجموعة مستخدمين صحيحة' });
   if (id === req.user.id && (role !== 'admin' || !active)) return res.status(400).json({ error: 'لا يمكنك تعطيل نفسك أو إزالة صلاحية المدير عنك' });
   if (b.password && !okPw(b.password)) return res.status(400).json({ error: 'كلمة المرور ٨ أحرف على الأقل' });
   if (t.role === 'admin' && t.active && (role !== 'admin' || !active) &&
       !db.prepare("SELECT 1 FROM users WHERE role='admin' AND active=1 AND id<>?").get(id))
     return res.status(409).json({ error: 'لا يمكن تعطيل أو تخفيض صلاحية آخر مدير نشط' });
-  db.prepare('UPDATE users SET role=?, active=?, pass=? WHERE id=?').run(role, active, b.password ? hash(b.password) : t.pass, id);
-  if (b.password || !active || role !== t.role) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+  db.prepare('UPDATE users SET role=?, active=?, pass=?,group_id=? WHERE id=?').run(role, active, b.password ? hash(b.password) : t.pass, groupId, id);
+  if (b.password || !active || role !== t.role || groupId !== t.group_id) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
   res.json({ ok: true });
 });
 
 // ---------- operations ----------
 const kinds = { personnel: { table: 'personnel', label: 'name', kind: 'personnel' }, vehicles: { table: 'vehicles', label: 'plate', kind: 'vehicle' } };
 const gateOf = g => (db.prepare("SELECT name FROM lookups WHERE kind='gate' AND name=?").get(g) || db.prepare("SELECT name FROM lookups WHERE kind='gate' ORDER BY id").get() || { name: '—' }).name;
+function processDueSoldierReturns() {
+  const activeLeaves = db.prepare(`SELECT l.id,l.person,l.expected_return_at,p.rank
+    FROM leaves l JOIN personnel p ON p.id=l.person_id
+    WHERE l.departed_at IS NOT NULL AND l.returned_at IS NULL AND p.rank='جندي'
+      AND l.expected_return_at IS NOT NULL AND l.expected_return_at<=?`).all(now());
+  const recipients = db.prepare('SELECT id FROM users WHERE active=1').all();
+  const insertEvent = db.prepare(`INSERT OR IGNORE INTO leave_return_events(leave_id,due_at,status,notified_at)
+    VALUES (?,?,'pending',?)`);
+  const addNotification = db.prepare(`INSERT INTO notifications
+    (recipient_id,actor_id,actor_name,type,summary,title,body,related_id,created_at)
+    VALUES (?,0,'النظام','soldier_return_due',?,?,?,?,?)`);
+  const createAlert = db.transaction(leave => {
+    const dueAt = leave.expected_return_at.slice(0, 16), createdAt = now();
+    const result = insertEvent.run(leave.id, dueAt, createdAt);
+    if (!result.changes) return;
+    const eventId = result.lastInsertRowid;
+    const title = 'تأكيد عودة جندي من الإجازة';
+    const body = `${leave.person} — موعد العودة المتوقع ${dueAt.replace('T', ' ')}`;
+    recipients.forEach(user => addNotification.run(user.id, title, title, body, eventId, createdAt));
+  });
+  for (const leave of activeLeaves) {
+    createAlert(leave);
+  }
+  db.prepare(`UPDATE leave_return_events SET status='rescheduled'
+    WHERE status='pending' AND EXISTS (
+      SELECT 1 FROM leaves l WHERE l.id=leave_return_events.leave_id
+        AND l.returned_at IS NULL AND substr(l.expected_return_at,1,16)<>leave_return_events.due_at
+    )`).run();
+}
 
 app.get('/api/vehicles', (q, res) => {
   const assignmentDate = dateOk(q.query.date) ? q.query.date : now().slice(0, 10);
   const registered = db.prepare(`SELECT v.*, v.vehicle AS type, a.driver_id, a.companion_id,
       p.name AS driver, p.rank AS rank, c.name AS companion, c.rank AS companion_rank,
-      CASE WHEN a.driver_id IS NOT NULL AND a.companion_id IS NOT NULL THEN 1 ELSE 0 END AS crew_assigned,
-      0 AS is_manual
+      CASE WHEN a.driver_id IS NOT NULL AND a.companion_id IS NOT NULL THEN 1 ELSE 0 END AS crew_assigned
     FROM vehicles v
     LEFT JOIN vehicle_assignments a ON a.vehicle_id=v.id AND a.date=?
     LEFT JOIN personnel p ON p.id=a.driver_id
@@ -887,26 +1189,7 @@ app.get('/api/vehicles', (q, res) => {
         JOIN personnel p ON p.id=ap.person_id
         WHERE ap.date=? AND ap.vehicle_id=? ORDER BY p.name`).all(assignmentDate, vehicle.id),
     }));
-  const manual = db.prepare(`SELECT m.ref AS plate,
-      (SELECT details FROM movements WHERE kind='vehicle' AND ref=m.ref ORDER BY id DESC LIMIT 1) AS details,
-      (SELECT destination FROM movements WHERE kind='vehicle' AND ref=m.ref ORDER BY id DESC LIMIT 1) AS last_destination,
-      (SELECT type FROM movements WHERE kind='vehicle' AND ref=m.ref ORDER BY id DESC LIMIT 1) AS last_type
-    FROM movements m
-    WHERE m.kind='vehicle' AND NOT EXISTS (SELECT 1 FROM vehicles v WHERE v.plate=m.ref)
-    GROUP BY m.ref ORDER BY MAX(m.id) DESC`).all().map(m => ({
-      ...m,
-      id: null,
-      type: m.details || 'مركبة غير مسجلة',
-      driver: null,
-      rank: null,
-      companion: null,
-      companion_rank: null,
-      purpose: m.last_destination || '',
-      inside: m.last_type === 'IN' ? 1 : 0,
-      is_completed: m.last_type === 'OUT',
-      is_manual: 1,
-    }));
-  res.json([...registered, ...manual]);
+  res.json(registered);
 });
 
 app.post('/api/vehicles/:id/assignment', (req, res) => {
@@ -956,23 +1239,6 @@ app.get('/api/vehicles/:id/history', (req, res) => {
   if (!v) return res.status(404).json({ error: 'المركبة غير موجودة' });
   res.json(vehicleHistory(v.plate));
 });
-app.post('/api/vehicles/manual-movement', (req, res) => {
-  const b = req.body, plate = String(b.plate || '').trim(), type = String(b.type || '');
-  const destination = String(b.destination || '').trim();
-  if (!plate || !['IN', 'OUT'].includes(type)) return res.status(400).json({ error: 'أدخل رقم اللوحة ونوع الحركة' });
-  if (db.prepare('SELECT 1 FROM vehicles WHERE plate=?').get(plate)) return res.status(409).json({ error: 'المركبة مسجلة بالفعل؛ استخدم سجل المركبات لتحديث حالتها' });
-  const previous = db.prepare("SELECT type FROM movements WHERE kind='vehicle' AND ref=? ORDER BY id DESC LIMIT 1").get(plate);
-  if (!previous && type !== 'IN') return res.status(409).json({ error: 'يجب تسجيل دخول المركبة أولاً' });
-  if (previous?.type === 'OUT') return res.status(409).json({ error: 'تم تسجيل خروج المركبة؛ الزيارة منتهية ولا يمكن تسجيل حركة أخرى لها' });
-  if (previous?.type === type) return res.status(409).json({ error: 'المركبة مسجلة بالداخل بالفعل' });
-  const vehicleType = String(b.vehicle_type || '').trim(), driver = String(b.driver || '').trim(), rank = String(b.rank || '').trim();
-  if (rank && !RK[rank]) return res.status(400).json({ error: 'اختر رتبة صحيحة' });
-  const details = [vehicleType && `نوع المركبة: ${vehicleType}`, driver && `السائق: ${driver}`, rank && `الرتبة: ${rank}`].filter(Boolean).join(' • ');
-  db.prepare('INSERT INTO movements(kind,ref_id,ref,type,ts,gate,destination,details,by) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run('vehicle', null, plate, type, now(), gateOf(b.gate), type === 'OUT' ? destination || null : null, details || null, req.user.username);
-  res.json({ ok: true });
-});
-
 app.post('/api/:k(personnel|vehicles)/:id/toggle', (req, res) => {
   const k = kinds[req.params.k];
   const out = db.transaction(() => {
@@ -1090,13 +1356,49 @@ app.post('/api/duty', (req, res) => {
 app.delete('/api/admin/duty/:id', admin, (req, res) => { db.prepare('DELETE FROM duty WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 
 // ---------- missions (المأموريات) ----------
+app.get('/api/saved-people', (req, res) => {
+  const kind = String(req.query.kind || '');
+  if (!['mission_security', 'visitor_companion'].includes(kind))
+    return res.status(400).json({ error: 'نوع قائمة الأفراد غير صحيح' });
+  res.json(db.prepare('SELECT name,rank FROM saved_people WHERE kind=? ORDER BY name COLLATE NOCASE LIMIT 2000').all(kind));
+});
 app.get('/api/missions', (q, res) => res.json(db.prepare("SELECT m.*, p.rank FROM missions m LEFT JOIN personnel p ON p.id=m.person_id ORDER BY (m.status='active') DESC, m.id DESC LIMIT 300").all()));
 app.post('/api/missions', (req, res) => {
   const b = req.body, p = personOf(b.person_id), dest = String(b.dest || '').trim();
   const startAt = editableTimestamp(b.start_at);
   if (!p || !dest || !startAt) return res.status(400).json({ error: 'اختر الفرد وجهة المأمورية وتاريخ ووقت الخروج' });
-  db.prepare('INSERT INTO missions(person_id,person,dest,purpose,notes,start_date,start_ts,by) VALUES (?,?,?,?,?,?,?,?)')
-    .run(p.id, p.name, dest, String(b.purpose || '').trim(), String(b.notes || '').trim(), startAt.slice(0, 10), startAt, req.user.username);
+  const securityEnabled = b.security_enabled === true;
+  const hasVehicle = b.security_has_vehicle === true;
+  const securityPeople = securityEnabled && Array.isArray(b.security_personnel)
+    ? savedPeopleOf(b.security_personnel) : null;
+  const securityCount = securityEnabled ? (securityPeople ? securityPeople.length : nonNegativeCount(b.security_personnel_count)) : 0;
+  const liveAmmo = securityEnabled ? nonNegativeCount(b.live_ammo_count) : 0;
+  const blankAmmo = securityEnabled ? nonNegativeCount(b.blank_ammo_count) : 0;
+  const securityDetails = securityEnabled
+    ? securityPeople ? JSON.stringify(securityPeople) : String(b.security_personnel_details || '').trim()
+    : '';
+  const weaponSerial = securityEnabled ? String(b.weapon_serial || '').trim() : '';
+  const vehicleType = hasVehicle ? String(b.security_vehicle_type || '').trim() : '';
+  const vehiclePlate = hasVehicle ? String(b.security_vehicle_plate || '').trim() : '';
+  const vehicleDetails = hasVehicle
+    ? [vehicleType, vehiclePlate].filter(Boolean).join(' - ') || String(b.security_vehicle_details || '').trim()
+    : '';
+  if (securityEnabled && (!securityCount || securityCount > 100 || !securityDetails || securityDetails.length > 20000 ||
+      (Array.isArray(b.security_personnel) && !securityPeople) || !weaponSerial || weaponSerial.length > 120 ||
+      liveAmmo === null || blankAmmo === null))
+    return res.status(400).json({ error: 'أدخل عدد أفراد التأمين وبياناتهم ورقم السلاح وأعداد الذخيرة الصحيحة' });
+  if (hasVehicle && ((!vehicleType || !vehiclePlate) && !b.security_vehicle_details ||
+      vehicleType.length > 120 || vehiclePlate.length > 80 || vehicleDetails.length > 500))
+    return res.status(400).json({ error: 'أدخل نوع السيارة ورقمها' });
+  db.transaction(() => {
+    if (securityPeople) rememberPeople('mission_security', securityPeople);
+    db.prepare(`INSERT INTO missions(person_id,person,dest,purpose,notes,start_date,start_ts,by,
+    security_enabled,security_personnel_count,security_personnel_details,weapon_serial,live_ammo_count,blank_ammo_count,
+    security_has_vehicle,security_vehicle_details,security_vehicle_type,security_vehicle_plate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(p.id, p.name, dest, String(b.purpose || '').trim(), String(b.notes || '').trim(), startAt.slice(0, 10), startAt,
+        req.user.username, securityEnabled ? 1 : 0, securityCount || 0, securityDetails, weaponSerial,
+        liveAmmo || 0, blankAmmo || 0, hasVehicle ? 1 : 0, vehicleDetails, vehicleType, vehiclePlate);
+  })();
   res.json({ ok: true });
 });
 app.post('/api/missions/:id/return', (req, res) => {
@@ -1131,6 +1433,9 @@ app.get('/api/leaves', (req, res) => {
       OR substr(l.departed_at,1,10)=? OR substr(l.returned_at,1,10)=?
     ORDER BY (l.departed_at IS NOT NULL AND l.returned_at IS NULL) DESC,l.start_date DESC,l.id DESC`).all(d, d, d));
 });
+app.get('/api/leaves/people', (req, res) => {
+  res.json(db.prepare('SELECT id,name,rank FROM personnel ORDER BY name COLLATE NOCASE').all());
+});
 app.post('/api/leaves', (req, res) => {
   const b = req.body, p = personOf(b.person_id);
   if (!p) return res.status(400).json({ error: 'اختر الفرد' });
@@ -1143,6 +1448,60 @@ app.post('/api/leaves', (req, res) => {
   const result = db.prepare('INSERT INTO leaves(person_id,person,start_date,end_date,reason,by,expected_return_at) VALUES (?,?,?,?,?,?,?)')
     .run(p.id, p.name, b.start_date, endDate, String(b.reason || '').trim(), req.user.username, expectedReturn.replace('T', ' '));
   res.json({ ok: true, id: result.lastInsertRowid });
+});
+app.get('/api/absences', (req, res) => {
+  res.json(db.prepare(`SELECT e.id AS event_id,e.due_at,e.status,COALESCE(e.expected_return_at,l.expected_return_at) AS expected_return_at,
+      l.id AS leave_id,l.person,l.person_id,l.start_date,l.end_date,l.reason,p.rank
+    FROM leave_return_events e
+    JOIN leaves l ON l.id=e.leave_id
+    LEFT JOIN personnel p ON p.id=l.person_id
+    WHERE l.returned_at IS NULL AND e.status IN ('no_show','pending')
+      AND e.id=(SELECT MAX(latest.id) FROM leave_return_events latest WHERE latest.leave_id=e.leave_id)
+    ORDER BY e.due_at,e.id`).all());
+});
+app.post('/api/leaves/return-events/:id/decision', (req, res) => {
+  const event = db.prepare(`SELECT e.*,l.person_id,l.person,l.returned_at,l.departed_at,l.expected_return_at AS current_expected_return_at,p.rank
+    FROM leave_return_events e JOIN leaves l ON l.id=e.leave_id
+    LEFT JOIN personnel p ON p.id=l.person_id WHERE e.id=?`).get(req.params.id);
+  if (!event) return res.status(404).json({ error: 'متابعة العودة غير موجودة' });
+  if (event.returned_at || !event.departed_at) return res.status(409).json({ error: 'الإجازة غير معلقة للعودة' });
+  if (!['pending','no_show'].includes(event.status)) return res.status(409).json({ error: 'تم إغلاق متابعة موعد العودة أو تغييره' });
+  if (event.status === 'pending' && event.current_expected_return_at?.slice(0, 16) !== event.due_at)
+    return res.status(409).json({ error: 'تم تغيير موعد العودة؛ استخدم أحدث إشعار' });
+  const decision = String(req.body.status || '');
+  if (!['arrived','absent'].includes(decision)) return res.status(400).json({ error: 'اختر حالة الوصول' });
+  const ts = now();
+  if (decision === 'absent') {
+    const expected = String(req.body.expected_return_at || ''), normalized = expected.replace('T', ' ');
+    if (!validCorrespondenceDate(expected.slice(0, 10)) || expected.length !== 16 || expected[10] !== 'T' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(expected.slice(11)) || normalized <= ts.slice(0, 16))
+      return res.status(400).json({ error: 'أدخل موعد عودة لاحقاً وصحيحاً' });
+    const update = db.transaction(() => {
+      db.prepare(`UPDATE leave_return_events SET status='no_show',confirmed_at=?,confirmed_by=?,expected_return_at=?
+        WHERE id=? AND status IN ('pending','no_show')`).run(ts, req.user.id, normalized, event.id);
+      db.prepare('UPDATE leaves SET expected_return_at=?,end_date=? WHERE id=? AND returned_at IS NULL')
+        .run(normalized, normalized.slice(0, 10), event.leave_id);
+      db.prepare("UPDATE notifications SET read_at=? WHERE type='soldier_return_due' AND related_id=? AND read_at IS NULL")
+        .run(ts, event.id);
+    });
+    update();
+    return res.json({ ok: true, status: 'no_show', expected_return_at: normalized });
+  }
+  const person = event.person_id && db.prepare('SELECT * FROM personnel WHERE id=?').get(event.person_id);
+  const update = db.transaction(() => {
+    db.prepare('UPDATE leaves SET returned_at=? WHERE id=? AND returned_at IS NULL').run(ts, event.leave_id);
+    db.prepare(`UPDATE leave_return_events SET status='returned',confirmed_at=?,confirmed_by=?
+      WHERE id=? AND status IN ('pending','no_show')`).run(ts, req.user.id, event.id);
+    if (person) {
+      db.prepare('UPDATE personnel SET inside=1 WHERE id=?').run(person.id);
+      db.prepare('INSERT INTO movements(kind,ref_id,ref,type,ts,gate,details,by) VALUES (?,?,?,?,?,?,?,?)')
+        .run('personnel', person.id, person.name, 'IN', ts, gateOf(req.body.gate), 'عودة إجازة', req.user.username);
+    }
+    db.prepare("UPDATE notifications SET read_at=? WHERE type='soldier_return_due' AND related_id=? AND read_at IS NULL")
+      .run(ts, event.id);
+  });
+  update();
+  res.json({ ok: true, status: 'returned', returned_at: ts });
 });
 app.post('/api/leaves/:id/depart', (req, res) => {
   const leave = db.prepare('SELECT * FROM leaves WHERE id=?').get(req.params.id);
@@ -1168,6 +1527,10 @@ app.post('/api/leaves/:id/return', (req, res) => {
   const ts = now();
   db.transaction(() => {
     db.prepare('UPDATE leaves SET returned_at=? WHERE id=?').run(ts, leave.id);
+    db.prepare(`UPDATE leave_return_events SET status='returned',confirmed_at=?,confirmed_by=?
+      WHERE leave_id=? AND status IN ('pending','no_show')`).run(ts, req.user.id, leave.id);
+    db.prepare(`UPDATE notifications SET read_at=? WHERE type='soldier_return_due'
+      AND related_id IN (SELECT id FROM leave_return_events WHERE leave_id=?) AND read_at IS NULL`).run(ts, leave.id);
     if (person) {
       db.prepare('UPDATE personnel SET inside=1 WHERE id=?').run(person.id);
       db.prepare('INSERT INTO movements(kind,ref_id,ref,type,ts,gate,details,by) VALUES (?,?,?,?,?,?,?,?)')
@@ -1194,14 +1557,44 @@ app.post('/api/visitors', (req, res) => {
   const name = String(req.body.name || '').trim(), rank = String(req.body.rank || '').trim();
   const reasonOther = req.body.reason_other === true;
   const reason = String(req.body.reason || '').trim(), unit = String(req.body.unit || '').trim();
+  const hasValuables = req.body.has_valuables === true;
+  const hasVehicle = req.body.has_vehicle === true;
+  const hasCompanions = req.body.has_companions === true;
+  const valuablesDetails = hasValuables ? String(req.body.valuables_details || '').trim() : '';
+  const vehicleType = hasVehicle ? String(req.body.vehicle_type || '').trim() : '';
+  const vehiclePlate = hasVehicle ? String(req.body.vehicle_plate || '').trim() : '';
+  const vehicleDetails = hasVehicle
+    ? [vehicleType, vehiclePlate].filter(Boolean).join(' - ') || String(req.body.vehicle_details || '').trim()
+    : '';
+  const companionPeople = hasCompanions && Array.isArray(req.body.companion_people)
+    ? savedPeopleOf(req.body.companion_people) : null;
+  const companionCount = hasCompanions
+    ? companionPeople ? companionPeople.length : nonNegativeCount(req.body.companion_count)
+    : 0;
+  const companionDetails = hasCompanions
+    ? companionPeople ? JSON.stringify(companionPeople) : String(req.body.companion_details || '').trim()
+    : '';
   if (!name || !RK[rank] || !reason) return res.status(400).json({ error: 'أدخل اسم الزائر ورتبته وسبب الزيارة' });
   if (reason.length > 200) return res.status(400).json({ error: 'سبب الزيارة يجب ألا يتجاوز ٢٠٠ حرف' });
   if (!reasonOther && !db.prepare("SELECT 1 FROM lookups WHERE kind='visit_reason' AND name=?").get(reason))
     return res.status(400).json({ error: 'اختر سبب زيارة من القائمة أو اختر «أخرى» لكتابة سبب جديد' });
   if (unit && !db.prepare("SELECT 1 FROM lookups WHERE kind='unit' AND name=?").get(unit))
     return res.status(400).json({ error: 'اختر وحدة صحيحة من القائمة' });
-  db.prepare('INSERT INTO visitors(name,rank,reason,unit,enter_ts,by) VALUES (?,?,?,?,?,?)')
-    .run(name, rank, reason, unit, now(), req.user.username);
+  if ((hasValuables && (!valuablesDetails || valuablesDetails.length > 500)) ||
+      (hasVehicle && ((!vehicleType || !vehiclePlate) && !req.body.vehicle_details ||
+        vehicleType.length > 120 || vehiclePlate.length > 80 || vehicleDetails.length > 500)) ||
+      (hasCompanions && (!companionCount || companionCount > 100 ||
+        (Array.isArray(req.body.companion_people) && !companionPeople) ||
+        !companionDetails || companionDetails.length > 20000)))
+    return res.status(400).json({ error: 'أكمل بيانات الأمانات أو السيارة أو عدد وبيانات المرافقين' });
+  db.transaction(() => {
+    if (companionPeople) rememberPeople('visitor_companion', companionPeople);
+    db.prepare(`INSERT INTO visitors(name,rank,reason,unit,enter_ts,by,has_valuables,valuables_details,
+      has_vehicle,vehicle_details,has_companions,companion_count,companion_details,vehicle_type,vehicle_plate)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(name, rank, reason, unit, now(), req.user.username, hasValuables ? 1 : 0, valuablesDetails,
+        hasVehicle ? 1 : 0, vehicleDetails, hasCompanions ? 1 : 0, companionCount || 0, companionDetails, vehicleType, vehiclePlate);
+  })();
   res.json({ ok: true });
 });
 app.post('/api/visitors/:id/exit', (req, res) => {
@@ -1754,6 +2147,13 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 }
 const server = app.listen({ port: PORT, exclusive: true }, () => {
   console.log(`Gate Control running on http://localhost:${PORT}`);
+  try { processDueSoldierReturns(); }
+  catch (error) { console.error('Unable to process due soldier return alerts:', error); }
+  const returnCheck = setInterval(() => {
+    try { processDueSoldierReturns(); }
+    catch (error) { console.error('Unable to process due soldier return alerts:', error); }
+  }, 60 * 1000);
+  returnCheck.unref();
   ensureDailyBackup().catch(error => console.error('Unable to create the daily database backup:', error));
   const backupCheck = setInterval(
     () => ensureDailyBackup().catch(error => console.error('Unable to create the daily database backup:', error)),

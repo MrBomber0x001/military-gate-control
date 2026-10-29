@@ -45,7 +45,6 @@
     <div class="p-3 border-t border-slate-200 dark:border-slate-800">
       <div class="flex items-center gap-3 p-2"><div id="meAv" class="grid h-9 w-9 place-items-center rounded-full bg-brand-100 text-brand-700 font-bold">؟</div>
         <div class="flex-1 min-w-0"><div id="meName" class="text-sm font-medium truncate"></div><div id="meRole" class="text-xs text-slate-500"></div></div>
-        <button onclick="changePasswordForm()" aria-label="تغيير كلمة المرور" title="تغيير كلمة المرور" class="text-xs rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800">🔑</button>
         <button onclick="logout()" class="text-xs rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800">خروج</button></div>
     </div>
   </aside>
@@ -96,7 +95,10 @@ let ME,PEOPLE=[],VISITOR_SUGGESTIONS=[],VISITOR_DEFAULT_SUGGESTIONS=[],visitorSu
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const ar=s=>String(s).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
+const ar=s=>String(s).replace(/(^|[ T])(\d{2}):(\d{2})(?::\d{2})?$/,(_,separator,hour,minute)=>{
+  const value=Number(hour),displayHour=value%12||12;
+  return `${separator}${String(displayHour).padStart(2,'0')}:${minute} ${value<12?'صباحاً':'مساءً'}`;
+}).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
 const money=c=>ar((c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))+' ج.م';
 const MOVE={IN:'دخول',OUT:'خروج'},KIND={personnel:'🧑 أفراد',vehicle:'🚗 مركبات'};
 async function api(u,body,method){
@@ -111,18 +113,9 @@ const closeDrawer=()=>{stopCorrespondenceMessagesRefresh();document.getElementBy
 const openDrawer=(t,h)=>{stopCorrespondenceMessagesRefresh();drawerTitle.textContent=t;drawerBody.innerHTML=h;drawer.classList.remove('hidden')};
 const run=async fn=>{try{await fn()}catch(e){toast(e.message)}};
 const isAdmin=()=>ME&&ME.role==='admin';
-function changePasswordForm(){
-  openDrawer('تغيير كلمة المرور',`<div><label class="text-xs font-medium" for="pw_current">كلمة المرور الحالية</label><input id="pw_current" type="password" autocomplete="current-password" class="${INP}"/></div>
-    <div><label class="text-xs font-medium" for="pw_new">كلمة المرور الجديدة (٨ أحرف على الأقل)</label><input id="pw_new" type="password" autocomplete="new-password" class="${INP}"/></div>
-    <div><label class="text-xs font-medium" for="pw_confirm">تأكيد كلمة المرور الجديدة</label><input id="pw_confirm" type="password" autocomplete="new-password" class="${INP}"/></div>
-    <div class="pt-2">${btn('حفظ كلمة المرور','changeMyPassword()')}</div>`);
-}
-const changeMyPassword=()=>run(async()=>{
-  const current_password=document.getElementById('pw_current').value,new_password=document.getElementById('pw_new').value,confirmPassword=document.getElementById('pw_confirm').value;
-  if(new_password!==confirmPassword)throw new Error('كلمتا المرور الجديدتان غير متطابقتين');
-  await api('auth/change-password',{current_password,new_password});
-  closeDrawer();toast('تم تغيير كلمة المرور');
-});
+const canRead=module=>isAdmin()||ME?.permissions?.[module]?.read===true;
+const canWrite=module=>isAdmin()||ME?.permissions?.[module]?.write===true;
+const moduleAction=(module,label,handler,style='primary')=>canWrite(module)?btn(label,handler,style):'';
 
 const INP='mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm';
 const C={green:'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',red:'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',gray:'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200',amber:'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',blue:'bg-brand-100 text-brand-700 dark:bg-brand-500/15 dark:text-brand-100'};
@@ -154,7 +147,7 @@ const saveTimestamp=(kind,id,field)=>run(async()=>{
 });
 const editTimestampButton=(kind,id,field,value,label)=>value
   ?`<span class="no-print">${btn('تعديل',`editTimestamp(${esc(JSON.stringify(kind))},${id},${esc(JSON.stringify(field))},${esc(JSON.stringify(value))},${esc(JSON.stringify(label))})`,'ghost')}</span>`:'';
-const mvRows=l=>l.map(m=>`<tr><td class="py-3 pe-4">${KIND[m.kind]||m.kind}</td><td class="pe-4 font-medium">${esc(m.ref)}</td><td class="pe-4">${badge(m.type)}</td><td class="pe-4">${esc(m.destination||'—')}</td><td class="pe-4">${esc(m.details||'—')}</td><td class="pe-4 text-slate-500">${ar(m.ts.slice(0,16))}</td><td class="pe-4">${editTimestampButton('movement',m.id,'ts',m.ts,'الحركة')}</td><td class="pe-4 text-slate-500">${esc(m.gate||'—')}</td><td class="pe-4 text-slate-500">${esc(m.by)}</td></tr>`).join('');
+const mvRows=l=>l.map(m=>`<tr><td class="py-3 pe-4">${KIND[m.kind]||m.kind}</td><td class="pe-4 font-medium">${esc(m.ref)}</td><td class="pe-4">${badge(m.type)}</td><td class="pe-4">${esc(m.destination||'—')}</td><td class="pe-4">${esc(m.details||'—')}</td><td class="pe-4 text-slate-500">${ar(m.ts.slice(0,16))}</td><td class="pe-4">${canWrite('movements')?editTimestampButton('movement',m.id,'ts',m.ts,'الحركة'):''}</td><td class="pe-4 text-slate-500">${esc(m.gate||'—')}</td><td class="pe-4 text-slate-500">${esc(m.by)}</td></tr>`).join('');
 const MVH=['القسم','المرجع','الحركة','الوجهة','بيانات إضافية','الوقت','تعديل الوقت','البوابة','بواسطة'];
 
 // generic form drawer
@@ -165,7 +158,7 @@ function form(title,fields,onSave,label='حفظ'){
   window._save=()=>run(async()=>{const v={};fields.forEach(f=>v[f.k]=document.getElementById('f_'+f.k).value);if(fields.some(f=>f.required&&!v[f.k]))throw new Error('يرجى ملء الحقول المطلوبة');await onSave(v);closeDrawer();render()});
   openDrawer(title,fields.map(fld).join('')+`<div class="pt-2">${btn(label,'_save()')}</div>`)}
 const pOpts=async()=>(await api('personnel?date='+state.date)).map(p=>[p.id,`${p.name} — ${p.rank}`]);
-const notificationTypes={personnel:'الأفراد',vehicle:'المركبات',attendance:'التمام',duty:'النوبتجية',mission:'المأموريات',clinic:'العيادات',leave:'الإجازات',visitor:'الزيارات',correspondence:'المكاتبات',correspondence_message:'متابعة المكاتبات',squad:'الفرق',purchase:'المشتريات',lookup:'القوائم',user:'المستخدمون',task:'التكليفات'};
+const notificationTypes={personnel:'الأفراد',vehicle:'المركبات',attendance:'التمام',duty:'النوبتجية',mission:'المأموريات',clinic:'العيادات',leave:'الإجازات',visitor:'الزيارات',correspondence:'المكاتبات',correspondence_message:'متابعة المكاتبات',soldier_return_due:'عودة الجنود',squad:'الفرق',purchase:'المشتريات',lookup:'القوائم',user:'المستخدمون',task:'التكليفات'};
 const notificationSound=new Audio('/notification.wav');
 notificationSound.preload='auto';
 let previousUnreadCount=null;
@@ -195,11 +188,28 @@ async function openInboxNotifications(){
     <p class="mt-1 text-xs text-slate-500">من ${esc(n.actor_name)} • ${ar(n.created_at.slice(0,16))}</p></div>
     ${n.read_at?tag('مقروء','gray'):btn('تحديد كمقروء',`markInboxNotificationRead(${n.id})`,'ghost')}</div>
     <p class="mt-3 whitespace-pre-wrap text-sm leading-7">${esc(n.body||n.summary)}</p>
-    ${n.related_id?`<div class="mt-3">${btn('فتح متابعة المكاتبة',`openCorrespondenceFromNotification(${n.id},${n.related_id})`,'ghost')}</div>`:''}</article>`).join('');
+    ${n.type==='soldier_return_due'?`<div class="mt-3 flex flex-wrap gap-2">${btn('تأكيد الوصول',`confirmSoldierReturn(${n.related_id})`,'ok')}${btn('لم يصل',`absentReturnForm(${n.related_id})`,'danger')}</div>`:
+      n.type==='correspondence_message'&&n.related_id?`<div class="mt-3">${btn('فتح متابعة المكاتبة',`openCorrespondenceFromNotification(${n.id},${n.related_id})`,'ghost')}</div>`:''}</article>`).join('');
   const send=isAdmin()?btn('إرسال إشعار للأعضاء','run(memberNotificationForm)','primary'):'';
   const markAll=data.unread?btn('تحديد الكل كمقروء','markAllInboxNotificationsRead()','ghost'):'';
   openDrawer('إشعاراتي',`<div class="flex flex-wrap gap-2">${send}${markAll}</div>${rows||empty('لا توجد إشعارات موجهة إليك بعد.')}`);
 }
+function absentReturnForm(eventId){
+  const date=new Date(Date.now()+24*60*60*1000),value=`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  openDrawer('تسجيل عدم الوصول',`<p class="text-sm text-slate-600 dark:text-slate-300">سيظل الفرد في قسم الغياب حتى تأكيد وصوله. أدخل موعد العودة المتوقع الجديد.</p>
+    <div><label class="text-xs font-medium" for="absenceExpectedReturn">موعد العودة المتوقع</label><input id="absenceExpectedReturn" type="datetime-local" value="${value}" required class="${INP}"/></div>
+    <div class="pt-2">${btn('تأكيد عدم الوصول',`submitSoldierReturn(${eventId},'absent')`)}</div>`);
+}
+const submitSoldierReturn=(eventId,status)=>run(async()=>{
+  const payload={status,gate:gateSel.value};
+  if(status==='absent')payload.expected_return_at=document.getElementById('absenceExpectedReturn').value;
+  await api(`leaves/return-events/${eventId}/decision`,payload);
+  closeDrawer();toast(status==='arrived'?'تم تأكيد وصول الفرد':'تم تسجيل الفرد في قسم الغياب');
+  await refreshInboxNotifications();
+  if(['leaves','absences'].includes(state.page))render();
+  if(document.getElementById('drawer').classList.contains('hidden')===false)await openInboxNotifications();
+});
+const confirmSoldierReturn=eventId=>submitSoldierReturn(eventId,'arrived');
 async function memberNotificationForm(){
   const users=(await api('admin/users')).filter(user=>user.active&&user.role==='operator');
   if(!users.length)throw new Error('لا يوجد أعضاء نشطون لإرسال إشعار إليهم');
@@ -281,18 +291,7 @@ const saveVehicleCrew=()=>run(async()=>{
 async function vehicleHistory(id){const v=(await api('vehicles')).find(x=>x.id===id);if(!v)throw new Error('المركبة غير موجودة');showVehicleHistory(v.plate)}
 async function showVehicleHistory(plate){
   const rows=await api(`vehicles/history?plate=${encodeURIComponent(plate)}`);
-  openDrawer(`سجل المركبة — ${plate}`,rows.length?table(['الحركة','الوجهة','بيانات إضافية','التاريخ والوقت','تعديل الوقت','البوابة','بواسطة'],rows.map(m=>`<tr><td class="py-3 pe-4">${badge(m.type)}</td><td class="pe-4">${esc(m.destination||'—')}</td><td class="pe-4">${esc(m.details||'—')}</td><td class="pe-4">${ar(m.ts.slice(0,16))}</td><td class="pe-4">${editTimestampButton('movement',m.id,'ts',m.ts,'حركة المركبة')}</td><td class="pe-4">${esc(m.gate||'—')}</td><td class="pe-4">${esc(m.by)}</td></tr>`).join('')):empty('لا يوجد سجل حركة لهذه اللوحة بعد.'));
-}
-async function manualVehicleMove(plate='',type=''){
-  const lookups=await api('lookups');
-  form('تسجيل حركة مركبة غير مسجلة',[
-    {k:'plate',l:'رقم اللوحة',v:plate},
-    {k:'vehicle_type',l:'نوع المركبة'},
-    {k:'driver',l:'اسم السائق'},
-    {k:'rank',l:'رتبة السائق',o:[['','— اختر الرتبة —'],...lookups.rank.map(r=>[r.name,r.name])]},
-    {k:'type',l:'نوع الحركة',v:type,o:[['IN','دخول'],['OUT','خروج']]},
-    {k:'destination',l:'وجهة الخروج (اختياري)'}
-  ],v=>api('vehicles/manual-movement',{...v,gate:gateSel.value}),'تسجيل الحركة');
+  openDrawer(`سجل المركبة — ${plate}`,rows.length?table(['الحركة','الوجهة','بيانات إضافية','التاريخ والوقت','تعديل الوقت','البوابة','بواسطة'],rows.map(m=>`<tr><td class="py-3 pe-4">${badge(m.type)}</td><td class="pe-4">${esc(m.destination||'—')}</td><td class="pe-4">${esc(m.details||'—')}</td><td class="pe-4">${ar(m.ts.slice(0,16))}</td><td class="pe-4">${canWrite('movements')?editTimestampButton('movement',m.id,'ts',m.ts,'حركة المركبة'):''}</td><td class="pe-4">${esc(m.gate||'—')}</td><td class="pe-4">${esc(m.by)}</td></tr>`).join('')):empty('لا يوجد سجل حركة لهذه اللوحة بعد.'));
 }
 function findVehicleHistoryForm(){
   openDrawer('بحث سجل مركبة',`<div><label class="text-xs font-medium" for="history_plate">رقم اللوحة</label><input id="history_plate" class="${INP}"/></div><div class="pt-2">${btn('عرض السجل','showVehicleHistory(history_plate.value)')}</div>`);
@@ -394,12 +393,12 @@ async function correspondenceDetails(id){
       <div class="flex items-center justify-between gap-2"><h4 class="font-semibold">متابعة وتعديلات المكاتبة</h4><span id="corr_chat_count" class="text-xs text-slate-500"></span></div>
       <p class="mt-1 text-xs text-slate-500">سجل زمني للنقاش والنسخ والتعديلات؛ كل نسخة تظل محفوظة في رسالتها.</p>
       <div id="corr_messages" class="mt-3 max-h-72 space-y-3 overflow-y-auto rounded-xl bg-slate-50 dark:bg-slate-950 p-3">${empty('جارٍ تحميل سجل المتابعة…')}</div>
-      <label class="mt-3 block text-xs font-medium" for="corr_message_body">رسالة أو وصف التعديل</label>
+      ${canWrite('correspondence')?`<label class="mt-3 block text-xs font-medium" for="corr_message_body">رسالة أو وصف التعديل</label>
       <textarea id="corr_message_body" maxlength="3000" rows="3" placeholder="اكتب تعليقاً أو وضّح ما تغير في النسخة الجديدة…" class="${INP}"></textarea>
       <label class="mt-2 block text-xs font-medium" for="corr_message_files">إرفاق نسخ أو مستندات (حتى ٥ ملفات لكل رسالة)</label>
       <input id="corr_message_files" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.txt" class="${INP}"/>
       <p class="mt-1 text-xs text-slate-500">حتى ٥ ميجابايت للملف الواحد، و١٥ ميجابايت إجمالاً. أرسل كل نسخة جديدة في رسالة مستقلة للاحتفاظ بتاريخ الإصدارات.</p>
-      <div class="mt-3">${btn('إضافة إلى المتابعة','sendCorrespondenceMessage('+item.id+')')}</div>
+      <div class="mt-3">${btn('إضافة إلى المتابعة','sendCorrespondenceMessage('+item.id+')')}</div>`:''}
     </div>
    </div>`);
   activeCorrespondenceChat=id;
@@ -435,25 +434,140 @@ const updateCorrespondenceStatus=(id,status)=>run(async()=>{await api(`correspon
 async function personHistory(id){
   const p=PEOPLE.find(x=>x.id===id),h=await api(`personnel/${id}/history`);
   openDrawer(p.name,`<div class="rounded-xl bg-slate-100 dark:bg-slate-800 p-4"><div class="font-medium">${esc(p.rank)} • ${esc(p.unit||'—')}</div><div class="text-xs text-slate-500">الرقم العسكري: <span dir="ltr">${esc(p.mid)}</span></div><div class="mt-2">${status(p.inside)}</div></div><h4 class="pt-2 font-semibold">سجل الحركة</h4>`+
-   (h.map(m=>`<div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-800 p-3"><div><div class="font-medium">${m.type==='IN'?'تسجيل دخول':'تسجيل خروج'}</div><div class="text-xs text-slate-500">${ar(m.ts.slice(0,16))} • ${esc(m.gate)}${m.destination?' • الوجهة: '+esc(m.destination):''}</div></div><div class="flex gap-2">${badge(m.type)}${editTimestampButton('movement',m.id,'ts',m.ts,'حركة الفرد')}</div></div>`).join('')||'<p class="text-slate-500">لا يوجد سجل بعد.</p>'))}
+   (h.map(m=>`<div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-800 p-3"><div><div class="font-medium">${m.type==='IN'?'تسجيل دخول':'تسجيل خروج'}</div><div class="text-xs text-slate-500">${ar(m.ts.slice(0,16))} • ${esc(m.gate)}${m.destination?' • الوجهة: '+esc(m.destination):''}</div></div><div class="flex gap-2">${badge(m.type)}${canWrite('movements')?editTimestampButton('movement',m.id,'ts',m.ts,'حركة الفرد'):''}</div></div>`).join('')||'<p class="text-slate-500">لا يوجد سجل بعد.</p>'))}
 
 const DUTY_ROLES=[['general','نوبتجي'],['assistant_officer','مساعد ظابط نباطشي'],['duty_officer','ظابط نباطشي'],['security_commander','حكمدار الأمن'],['services_commander','حكمدار الخدمات']];
 async function dutyForm(){const o=await pOpts();form('تسجيل نوبتجي',[{k:'person_id',l:'الفرد',o},{k:'role',l:'الصفة / الوسم',o:DUTY_ROLES,v:'general'},{k:'start_date',l:'من تاريخ',t:'date',v:state.date},{k:'end_date',l:'إلى تاريخ (شامل)',t:'date',v:state.date},{k:'notes',l:'ملاحظات'}],v=>api('duty',v),'تسجيل النوبتجية')}
-async function missionForm(){const [o,L]=await Promise.all([pOpts(),api('lookups')]);
-  form('مأمورية جديدة',[{k:'person_id',l:'الفرد',o},{k:'dest',l:'جهة المأمورية',list:L.destination.map(x=>x.name)},{k:'purpose',l:'الغرض'},{k:'start_at',l:'تاريخ ووقت الخروج',t:'datetime-local',v:localDateTime,required:true},{k:'notes',l:'ملاحظات'}],v=>api('missions',v),'تسجيل المأمورية')}
+let MISSION_SECURITY_SUGGESTIONS=[],VISITOR_COMPANION_SUGGESTIONS=[],MISSION_SECURITY_RANKS=[],VISITOR_COMPANION_RANKS=[];
+let missionSecurityPersonRow=0,visitorCompanionPersonRow=0;
+const savedPersonOptions=people=>people.map(person=>`<option value="${esc(person.name)}" label="${esc(person.rank)}"></option>`).join('');
+function savedPersonRow(prefix,index,listId,ranks,person={}){
+  const rankOptions=[['','— اختر الرتبة —'],...ranks.map(rank=>[rank.name,rank.name])];
+  return `<div class="saved-person-row grid gap-2 rounded-lg border border-slate-200 dark:border-slate-700 p-3 sm:grid-cols-[1fr_1fr_auto]">
+    <div><label class="text-xs font-medium" for="${prefix}_name_${index}">الاسم</label><input id="${prefix}_name_${index}" list="${listId}" maxlength="120" value="${esc(person.name||'')}" autocomplete="off" class="${INP}" onchange="applySavedPersonRank('${prefix}',${index})"/></div>
+    <div><label class="text-xs font-medium" for="${prefix}_rank_${index}">الرتبة</label><select id="${prefix}_rank_${index}" class="${INP}">${rankOptions.map(([value,label])=>`<option value="${esc(value)}" ${value===person.rank?'selected':''}>${esc(label)}</option>`).join('')}</select></div>
+    <button type="button" class="rounded-lg border border-slate-200 dark:border-slate-700 px-3 text-sm text-rose-600" onclick="this.closest('.saved-person-row').remove();updateSavedPeopleCount('${prefix}')">إزالة</button>
+  </div>`;
+}
+function addSavedPerson(containerId,prefix,listId,ranks,person={}){
+  const index=prefix==='mission-security'?missionSecurityPersonRow++:visitorCompanionPersonRow++;
+  document.getElementById(containerId).insertAdjacentHTML('beforeend',savedPersonRow(prefix,index,listId,ranks,person));
+  updateSavedPeopleCount(prefix);
+}
+function applySavedPersonRank(prefix,index){
+  const name=document.getElementById(`${prefix}_name_${index}`).value.trim().toLocaleLowerCase();
+  const suggestions=prefix==='mission-security'?MISSION_SECURITY_SUGGESTIONS:VISITOR_COMPANION_SUGGESTIONS;
+  const match=suggestions.find(person=>person.name.toLocaleLowerCase()===name);
+  if(match)document.getElementById(`${prefix}_rank_${index}`).value=match.rank;
+}
+function readSavedPeople(containerId,prefix){
+  return [...document.getElementById(containerId).querySelectorAll('.saved-person-row')].map(row=>({
+    name:row.querySelector('input').value.trim(),
+    rank:row.querySelector('select').value,
+  }));
+}
+function savedPeopleSummary(value){
+  try{
+    const people=JSON.parse(value);
+    if(Array.isArray(people))return people.map(person=>`${esc(person.name)} — ${esc(person.rank)}`).join('<br>')||'—';
+  }catch(error){if(!(error instanceof SyntaxError))throw error}
+  return esc(value||'—');
+}
+function updateSavedPeopleCount(prefix){
+  const containerId=prefix==='mission-security'?'missionSecurityPeople':'visitorCompanionPeople';
+  const counterId=prefix==='mission-security'?'missionSecurityCount':'visitorCompanionCount';
+  const count=document.getElementById(containerId)?.querySelectorAll('.saved-person-row').length||0;
+  const counter=document.getElementById(counterId);
+  if(counter)counter.textContent=ar(count);
+}
+async function missionForm(){const [o,L,savedPeople]=await Promise.all([pOpts(),api('lookups'),api('saved-people?kind=mission_security')]);
+  MISSION_SECURITY_SUGGESTIONS=savedPeople;MISSION_SECURITY_RANKS=L.rank;missionSecurityPersonRow=0;
+  const destinations=L.destination.map(x=>`<option value="${esc(x.name)}">`).join('');
+  openDrawer('مأمورية جديدة',`<div><label class="text-xs font-medium" for="mission_person_id">الفرد</label><select id="mission_person_id" required class="${INP}">${o.map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('')}</select></div>
+    <div><label class="text-xs font-medium" for="mission_dest">جهة المأمورية</label><input id="mission_dest" list="missionDestinations" required class="${INP}"/><datalist id="missionDestinations">${destinations}</datalist></div>
+    <div><label class="text-xs font-medium" for="mission_purpose">الغرض</label><input id="mission_purpose" class="${INP}"/></div>
+    <div><label class="text-xs font-medium" for="mission_start_at">تاريخ ووقت الخروج</label><input id="mission_start_at" type="datetime-local" value="${localDateTime}" required class="${INP}"/></div>
+    <div><label class="text-xs font-medium" for="mission_notes">ملاحظات</label><input id="mission_notes" class="${INP}"/></div>
+    <label class="flex items-center gap-2 text-sm"><input id="mission_security_enabled" type="checkbox" onchange="toggleMissionSecurity()" class="rounded"/> يوجد تأمين</label>
+    <div id="missionSecurityFields" class="hidden space-y-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+      <div class="flex items-center justify-between"><span class="text-sm font-medium">أفراد التأمين (<span id="missionSecurityCount">٠</span>)</span><button type="button" class="text-sm text-brand-600" onclick="addSavedPerson('missionSecurityPeople','mission-security','missionSecurityNames',MISSION_SECURITY_RANKS)">+ أضف فرد تأمين</button></div>
+      <datalist id="missionSecurityNames">${savedPersonOptions(MISSION_SECURITY_SUGGESTIONS)}</datalist>
+      <div id="missionSecurityPeople" class="space-y-2"></div>
+      <p class="text-xs text-slate-500">اكتب أول حروف الاسم لاختيار اسم محفوظ؛ ستُملأ الرتبة تلقائيًا. يمكن إضافة أسماء جديدة.</p>
+      <div><label class="text-xs font-medium" for="mission_weapon_serial">رقم السلاح</label><input id="mission_weapon_serial" maxlength="120" class="${INP}"/></div>
+      <div class="grid grid-cols-2 gap-3"><div><label class="text-xs font-medium" for="mission_live_ammo">ذخيرة حي</label><input id="mission_live_ammo" type="number" min="0" max="10000" step="1" value="0" class="${INP}"/></div>
+      <div><label class="text-xs font-medium" for="mission_blank_ammo">ذخيرة فشنك</label><input id="mission_blank_ammo" type="number" min="0" max="10000" step="1" value="0" class="${INP}"/></div></div>
+    </div>
+    <label class="flex items-center gap-2 text-sm"><input id="mission_security_has_vehicle" type="checkbox" onchange="toggleMissionVehicle()" class="rounded"/> مع المأمورية سيارة</label>
+    <div id="missionSecurityVehicle" class="hidden space-y-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"><div><label class="text-xs font-medium" for="mission_security_vehicle_type">نوع السيارة</label><input id="mission_security_vehicle_type" maxlength="120" class="${INP}"/></div><div><label class="text-xs font-medium" for="mission_security_vehicle_plate">رقم السيارة</label><input id="mission_security_vehicle_plate" maxlength="80" class="${INP}"/></div></div>
+    <div class="pt-2">${btn('تسجيل المأمورية','saveMission()')}</div>`);
+  addSavedPerson('missionSecurityPeople','mission-security','missionSecurityNames',MISSION_SECURITY_RANKS);
+}
+function toggleMissionSecurity(){document.getElementById('missionSecurityFields').classList.toggle('hidden',!document.getElementById('mission_security_enabled').checked)}
+function toggleMissionVehicle(){document.getElementById('missionSecurityVehicle').classList.toggle('hidden',!document.getElementById('mission_security_has_vehicle').checked)}
+const saveMission=()=>run(async()=>{
+  const security=document.getElementById('mission_security_enabled').checked;
+  const hasVehicle=document.getElementById('mission_security_has_vehicle').checked;
+  const securityPeople=security?readSavedPeople('missionSecurityPeople','mission-security'):[];
+  const weaponSerial=document.getElementById('mission_weapon_serial').value.trim();
+  const liveAmmo=document.getElementById('mission_live_ammo').value;
+  const blankAmmo=document.getElementById('mission_blank_ammo').value;
+  const vehicleType=document.getElementById('mission_security_vehicle_type').value.trim();
+  const vehiclePlate=document.getElementById('mission_security_vehicle_plate').value.trim();
+  if(!document.getElementById('mission_person_id').value||!document.getElementById('mission_dest').value.trim()||!document.getElementById('mission_start_at').value)
+    throw new Error('اختر الفرد وجهة المأمورية وتاريخ ووقت الخروج');
+  if(security&&(!securityPeople.length||securityPeople.some(person=>!person.name||!person.rank)||!weaponSerial||liveAmmo===''||blankAmmo===''))
+    throw new Error('أضف فرد تأمين بالاسم والرتبة، ورقم السلاح وأعداد الذخيرة');
+  if(hasVehicle&&(!vehicleType||!vehiclePlate))throw new Error('أدخل نوع السيارة ورقمها');
+  await api('missions',{
+    person_id:document.getElementById('mission_person_id').value,
+    dest:document.getElementById('mission_dest').value,
+    purpose:document.getElementById('mission_purpose').value,
+    start_at:document.getElementById('mission_start_at').value,
+    notes:document.getElementById('mission_notes').value,
+    security_enabled:security,
+    security_personnel:securityPeople,
+    weapon_serial:weaponSerial,
+    live_ammo_count:liveAmmo,
+    blank_ammo_count:blankAmmo,
+    security_has_vehicle:hasVehicle,
+    security_vehicle_type:vehicleType,
+    security_vehicle_plate:vehiclePlate,
+  });
+  closeDrawer();toast('تم تسجيل المأمورية');render();
+});
 async function clinicForm(){const o=await pOpts();
   form('تسجيل خروج للعيادة',[{k:'person_id',l:'الفرد',o},{k:'case',l:'الحالة / سبب التوجه'},{k:'hospital',l:'المستشفى أو الجهة'}],v=>api('clinics',v),'تسجيل الخروج')}
-async function leaveForm(){const o=await pOpts();
+async function leaveForm(){const o=(await api('leaves/people')).map(p=>[p.id,`${p.name} — ${p.rank}`]);
   form('تسجيل إجازة',[{k:'person_id',l:'الفرد',o},{k:'start_date',l:'تاريخ بداية الإجازة',t:'date',v:state.date,required:true},{k:'expected_return_at',l:'موعد العودة المتوقع',t:'datetime-local',v:`${state.date}T23:59`,required:true},{k:'reason',l:'سبب الإجازة'}],v=>api('leaves',v),'حفظ الإجازة')}
-async function visitorForm(){const [L,suggestions]=await Promise.all([api('lookups'),api('visitors/suggestions')]);
+async function visitorForm(){const [L,suggestions,companionPeople]=await Promise.all([api('lookups'),api('visitors/suggestions'),api('saved-people?kind=visitor_companion')]);
   VISITOR_SUGGESTIONS=VISITOR_DEFAULT_SUGGESTIONS=suggestions;
+  VISITOR_COMPANION_SUGGESTIONS=companionPeople;VISITOR_COMPANION_RANKS=L.rank;visitorCompanionPersonRow=0;
   const reasonOptions=(L.visit_reason||[]).map(reason=>`<option value="${esc(reason.name)}">${esc(reason.name)}</option>`).join('');
   openDrawer('تسجيل زيارة',`<div><label class="text-xs font-medium" for="visitor_name">اسم الزائر</label><input id="visitor_name" list="visitorNames" maxlength="120" autocomplete="off" oninput="searchVisitorSuggestions(this.value)" onchange="applyVisitorSuggestion()" class="${INP}"/><datalist id="visitorNames">${visitorSuggestionOptions()}</datalist><p class="mt-1 text-xs text-slate-500">اكتب للبحث عن اسم مسجل، أو أدخل اسماً جديداً ليُحفظ مع الزيارة.</p></div>
     <div><label class="text-xs font-medium" for="visitor_rank">الرتبة</label><select id="visitor_rank" class="${INP}"><option value="">— اختر الرتبة —</option>${L.rank.map(rank=>`<option value="${esc(rank.name)}">${esc(rank.name)}</option>`).join('')}</select></div>
     <div><label class="text-xs font-medium" for="visitor_unit">الوحدة</label><select id="visitor_unit" class="${INP}"><option value="">— اختر الوحدة —</option>${L.unit.map(unit=>`<option value="${esc(unit.name)}">${esc(unit.name)}</option>`).join('')}</select></div>
     <div><label class="text-xs font-medium" for="visitor_reason_option">سبب الزيارة</label><select id="visitor_reason_option" onchange="toggleOtherVisitorReason()" class="${INP}"><option value="">— اختر سبب الزيارة —</option>${reasonOptions}<option value="__other__">أخرى — كتابة سبب جديد</option></select>${L.visit_reason.length?'':`<p class="mt-1 text-xs text-amber-600">لا توجد أسباب في القائمة بعد؛ يمكن للأدمن إضافتها من إدارة البيانات ← القوائم، أو اكتب سبباً عبر «أخرى».</p>`}</div>
     <div id="visitorOtherReasonWrap" class="hidden"><label class="text-xs font-medium" for="visitor_other_reason">اكتب سبب الزيارة</label><input id="visitor_other_reason" maxlength="200" class="${INP}"/></div>
-    <div class="pt-2">${btn('تسجيل الدخول','saveVisitor()')}</div>`)}
+    <label class="flex items-center gap-2 text-sm"><input id="visitor_has_valuables" type="checkbox" onchange="toggleVisitDetails()" class="rounded"/> توجد أمانات</label>
+    <div id="visitorValuablesFields" class="hidden"><label class="text-xs font-medium" for="visitor_valuables_details">بيانات الأمانات</label><textarea id="visitor_valuables_details" maxlength="500" rows="2" class="${INP}"></textarea></div>
+    <label class="flex items-center gap-2 text-sm"><input id="visitor_has_vehicle" type="checkbox" onchange="toggleVisitDetails()" class="rounded"/> مع الزائر سيارة</label>
+    <div id="visitorVehicleFields" class="hidden space-y-3"><div><label class="text-xs font-medium" for="visitor_vehicle_type">نوع السيارة</label><input id="visitor_vehicle_type" maxlength="120" class="${INP}"/></div><div><label class="text-xs font-medium" for="visitor_vehicle_plate">رقم السيارة</label><input id="visitor_vehicle_plate" maxlength="80" class="${INP}"/></div></div>
+    <label class="flex items-center gap-2 text-sm"><input id="visitor_has_companions" type="checkbox" onchange="toggleVisitDetails()" class="rounded"/> مع الزائر مرافقون</label>
+    <div id="visitorCompanionFields" class="hidden space-y-3">
+      <div class="flex items-center justify-between"><span class="text-sm font-medium">المرافقون (<span id="visitorCompanionCount">٠</span>)</span><button type="button" class="text-sm text-brand-600" onclick="addSavedPerson('visitorCompanionPeople','visitor-companion','visitorCompanionNames',VISITOR_COMPANION_RANKS)">+ أضف مرافقاً آخر</button></div>
+      <datalist id="visitorCompanionNames">${savedPersonOptions(VISITOR_COMPANION_SUGGESTIONS)}</datalist>
+      <div id="visitorCompanionPeople" class="space-y-2"></div>
+      <p class="text-xs text-slate-500">اكتب أول حروف الاسم لاختيار اسم محفوظ؛ ستُملأ الرتبة تلقائيًا. يمكن إضافة مرافقين جدد.</p>
+    </div>
+    <div class="pt-2">${btn('تسجيل الدخول','saveVisitor()')}</div>`);
+  addSavedPerson('visitorCompanionPeople','visitor-companion','visitorCompanionNames',VISITOR_COMPANION_RANKS);
+}
+function toggleVisitDetails(){
+  document.getElementById('visitorValuablesFields').classList.toggle('hidden',!document.getElementById('visitor_has_valuables').checked);
+  document.getElementById('visitorVehicleFields').classList.toggle('hidden',!document.getElementById('visitor_has_vehicle').checked);
+  document.getElementById('visitorCompanionFields').classList.toggle('hidden',!document.getElementById('visitor_has_companions').checked);
+}
 const visitorSuggestionOptions=()=>VISITOR_SUGGESTIONS.map(visitor=>`<option value="${esc(visitor.name)}" label="${esc([visitor.rank,visitor.unit].filter(Boolean).join(' • '))}"></option>`).join('');
 function searchVisitorSuggestions(value){
   clearTimeout(visitorSuggestionTimer);
@@ -486,13 +600,26 @@ function toggleOtherVisitorReason(){
 const saveVisitor=()=>run(async()=>{
   const reasonOption=document.getElementById('visitor_reason_option').value,reasonOther=reasonOption==='__other__';
   const reason=reasonOther?document.getElementById('visitor_other_reason').value.trim():reasonOption;
+  const hasValuables=document.getElementById('visitor_has_valuables').checked;
+  const hasVehicle=document.getElementById('visitor_has_vehicle').checked;
+  const hasCompanions=document.getElementById('visitor_has_companions').checked;
+  const valuablesDetails=document.getElementById('visitor_valuables_details').value.trim();
+  const vehicleType=document.getElementById('visitor_vehicle_type').value.trim();
+  const vehiclePlate=document.getElementById('visitor_vehicle_plate').value.trim();
+  const companionPeople=hasCompanions?readSavedPeople('visitorCompanionPeople','visitor-companion'):[];
   if(!document.getElementById('visitor_name').value.trim()||!document.getElementById('visitor_rank').value||!reason)
     throw new Error('أدخل اسم الزائر ورتبته واختر سبب الزيارة أو اكتبه');
+  if((hasValuables&&!valuablesDetails)||(hasVehicle&&(!vehicleType||!vehiclePlate))||
+      (hasCompanions&&(!companionPeople.length||companionPeople.some(person=>!person.name||!person.rank))))
+    throw new Error('أكمل بيانات الأمانات، أو نوع السيارة ورقمها، أو أضف المرافقين بالاسم والرتبة');
   await api('visitors',{
     name:document.getElementById('visitor_name').value,
     rank:document.getElementById('visitor_rank').value,
     unit:document.getElementById('visitor_unit').value,
     reason,reason_other:reasonOther,
+    has_valuables:hasValuables,valuables_details:valuablesDetails,
+    has_vehicle:hasVehicle,vehicle_type:vehicleType,vehicle_plate:vehiclePlate,
+    has_companions:hasCompanions,companion_people:companionPeople,
   });
   closeDrawer();toast('تم تسجيل الزيارة');render();
 });
@@ -501,11 +628,11 @@ async function manageSquad(id){
   const rows=squad.members.map(m=>{
     const attended=Boolean(m.enter_ts),absent=Boolean(m.absent);
     const statusLabel=attended?tag(m.exit_ts?'انصرف':'حاضر','green'):absent?tag('غائب','red'):tag('إجازة','gray');
-    const action=attended
+    const action=!canWrite('squads')?'':attended
       ?!m.exit_ts?btn('تسجيل الانصراف',`squadAttendance(${id},${m.person_id},'out')`,'ok'):tag('اكتمل اليوم','gray')
       :absent?btn('إلغاء الغياب',`squadAttendance(${id},${m.person_id},'leave')`,'ghost')
       :btn('تسجيل الحضور',`squadAttendance(${id},${m.person_id},'in')`)+btn('تسجيل غياب',`squadAttendance(${id},${m.person_id},'absent')`,'danger');
-    return `<tr><td class="py-3 pe-4 font-medium">${esc(m.name)}<div class="text-xs text-slate-500">${esc(m.mid)}</div></td><td class="pe-4">${esc(m.rank)}</td><td class="pe-4">${m.enter_ts?ar(m.enter_ts.slice(11,16)):tag('—','gray')} ${editTimestampButton('squad',m.attendance_id,'enter_ts',m.enter_ts,'حضور الفرقة')}</td><td class="pe-4">${m.exit_ts?ar(m.exit_ts.slice(11,16)):tag('—','gray')} ${editTimestampButton('squad',m.attendance_id,'exit_ts',m.exit_ts,'انصراف الفرقة')}</td><td class="pe-4">${statusLabel}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${action}${btn(`السجل (${ar(m.attended_count)} حضور · ${ar(m.absent_count)} غياب)`,`run(()=>showSquadMemberHistory(${id},${m.person_id}))`,'ghost')}</div></td></tr>`}).join('');
+    return `<tr><td class="py-3 pe-4 font-medium">${esc(m.name)}<div class="text-xs text-slate-500">${esc(m.mid)}</div></td><td class="pe-4">${esc(m.rank)}</td><td class="pe-4">${m.enter_ts?ar(m.enter_ts.slice(11,16)):tag('—','gray')} ${canWrite('squads')?editTimestampButton('squad',m.attendance_id,'enter_ts',m.enter_ts,'حضور الفرقة'):''}</td><td class="pe-4">${m.exit_ts?ar(m.exit_ts.slice(11,16)):tag('—','gray')} ${canWrite('squads')?editTimestampButton('squad',m.attendance_id,'exit_ts',m.exit_ts,'انصراف الفرقة'):''}</td><td class="pe-4">${statusLabel}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${action}${btn(`السجل (${ar(m.attended_count)} حضور · ${ar(m.absent_count)} غياب)`,`run(()=>showSquadMemberHistory(${id},${m.person_id}))`,'ghost')}</div></td></tr>`}).join('');
   openDrawer(squad.name,`<p class="text-xs text-slate-500">تُدار عضوية الفرقة من صفحة الأدمن. مدة الفرقة: ${ar(squad.start_date)} — ${ar(squad.end_date)} • اليوم غير المسجل حضوراً أو غياباً يُعد إجازة. التاريخ المحدد: ${ar(state.date)}</p>${squad.members.length?table(['الفرد','الرتبة','دخول','خروج','حالة اليوم','الإجراءات'],rows):empty('لم يضف الأدمن أفراداً إلى هذه الفرقة بعد.')}`);
 }
 async function showSquadMemberHistory(squadId,personId){
@@ -539,9 +666,9 @@ async function purchaseForm(){const o=await pOpts();KNOWN=await api('purchases/i
 const savePurchase=()=>run(async()=>{await api('purchases',{person_id:pu_person.value,date:pu_date.value,lines:PL.filter(r=>r.item.trim())});closeDrawer();toast('تم تسجيل المشتريات');render()});
 
 // ---------- pages ----------
-const nav=[['dashboard','لوحة العمليات','📊'],['tasks','التكليفات','✅'],['personnel','الأفراد','🧑‍✈️'],['clinics','العيادات','🏥'],['leaves','الإجازات','🗓️'],['visitors','الزيارات','👤'],['correspondence','المكاتبات','📑'],['squads','الفرق','👥'],['vehicles','المركبات','🚗'],['duty','النوبتجية','🛡️'],['missions','المأموريات','📨'],['purchases','المشتريات','🛒'],['movements','سجل الحركة','🔁'],['reports','التقارير','📄']];
-const renderNav=()=>document.getElementById('nav').innerHTML=nav.map(([id,l,i])=>`<button onclick="go('${id}')" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-start transition ${state.page===id?'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-100 font-semibold':'hover:bg-slate-100 dark:hover:bg-slate-800'}"><span>${i}</span><span>${l}</span></button>`).join('');
-const go=p=>{state.page=p;renderNav();render();window.scrollTo({top:0});closeMobileNav()};
+const nav=[['dashboard','لوحة العمليات','📊'],['tasks','التكليفات','✅'],['personnel','الأفراد','🧑‍✈️'],['clinics','العيادات','🏥'],['leaves','الإجازات','🗓️'],['absences','الغياب','⚠️'],['visitors','الزيارات','👤'],['correspondence','المكاتبات','📑'],['squads','الفرق','👥'],['vehicles','المركبات','🚗'],['duty','النوبتجية','🛡️'],['missions','المأموريات','📨'],['purchases','المشتريات','🛒'],['movements','سجل الحركة','🔁'],['reports','التقارير','📄']];
+const renderNav=()=>document.getElementById('nav').innerHTML=nav.filter(([id])=>canRead(id)).map(([id,l,i])=>`<button onclick="go('${id}')" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-start transition ${state.page===id?'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-100 font-semibold':'hover:bg-slate-100 dark:hover:bg-slate-800'}"><span>${i}</span><span>${l}</span></button>`).join('');
+const go=p=>{if(!canRead(p))return toast('لا تملك صلاحية عرض هذا القسم');state.page=p;renderNav();render();window.scrollTo({top:0});closeMobileNav()};
 const saveDailyHandover=date=>run(async()=>{
   await api('handovers',{date,notes:document.getElementById('handoverNotes').value});
   toast('تم حفظ تسليم اليوم');
@@ -569,14 +696,14 @@ const pages={
        ${handover.notes?`<div class="whitespace-pre-wrap rounded-xl bg-slate-50 dark:bg-slate-800 p-4 text-sm">${esc(handover.notes)}</div>`:`<p class="text-sm text-slate-500">لا توجد ملاحظات إضافية.</p>`}
        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">${savedRetiredPresence?kpi('المتقاعدون بالداخل',`${savedRetiredPresence.inside} / ${savedRetiredPresence.total}`,'وقت إعداد التسليم'):kpi('تمام الضباط المتقاعدين',`${savedRetired.present} / ${savedRetired.total}`,'تسليم قديم')}${kpi('حضور الفرق',savedSquads.present,'وقت إعداد التسليم','text-emerald-600')}${kpi('غياب الفرق',savedSquads.absent,'مسجل وقت التسليم','text-rose-600')}${kpi('إجازة الفرق',savedLeaveCount,'غير مسجلين حضوراً أو غياباً')}${kpi('حركة البوابة',handover.summary.entries+handover.summary.exits,'دخول وخروج')}</div>
        ${savedItems.length?`<ul class="list-disc space-y-1 pe-5 text-sm">${savedItems.map(item=>`<li>${esc(item.label)}</li>`).join('')}</ul>`:`<p class="text-sm text-emerald-700 dark:text-emerald-300">لم تكن هناك عناصر معلقة عند إعداد التسليم.</p>`}
-       ${handover.acknowledged_at?`<p class="text-sm text-emerald-700 dark:text-emerald-300">استلمه ${esc(handover.acknowledged_by_name)} في ${ar(handover.acknowledged_at.slice(0,16))}</p>`:handover.prepared_by===ME?.id?`<p class="text-sm text-amber-700 dark:text-amber-300">يجب أن يؤكد مستخدم آخر استلام هذا التسليم.</p>`:btn('تأكيد استلام التسليم',`acknowledgeDailyHandover('${state.date}')`,'ok')}
+       ${handover.acknowledged_at?`<p class="text-sm text-emerald-700 dark:text-emerald-300">استلمه ${esc(handover.acknowledged_by_name)} في ${ar(handover.acknowledged_at.slice(0,16))}</p>`:handover.prepared_by===ME?.id?`<p class="text-sm text-amber-700 dark:text-amber-300">يجب أن يؤكد مستخدم آخر استلام هذا التسليم.</p>`:moduleAction('dashboard','تأكيد استلام التسليم',`acknowledgeDailyHandover('${state.date}')`,'ok')}
       </div>`)
     :card('إقفال اليوم وتسليم الوردية',`<span class="text-sm text-slate-500">${ar(state.date)}</span>`,
       `<p class="mb-3 text-sm text-slate-500">سيُحفظ ملخص ثابت لحركة اليوم والعناصر التي ما زالت مفتوحة، ويمكن إضافة ملاحظات للوردية التالية.</p>
        <label class="text-xs font-medium" for="handoverNotes">ملاحظات التسليم (اختياري)</label>
        <textarea id="handoverNotes" maxlength="5000" rows="4" class="${INP}" placeholder="أضف ما تحتاج الوردية التالية إلى معرفته..."></textarea>
-       <div class="mt-3">${btn('حفظ ملخص اليوم وتسليمه',`saveDailyHandover('${state.date}')`)}</div>`);
-  const quickLinks=`<div class="flex flex-wrap gap-2">${btn('الأفراد',"go('personnel')",'ghost')}${btn('تسجيل زيارة',"go('visitors')",'ghost')}${btn('المركبات',"go('vehicles')",'ghost')}${btn('الفرق',"go('squads')",'ghost')}</div>`;
+       <div class="mt-3">${moduleAction('dashboard','حفظ ملخص اليوم وتسليمه',`saveDailyHandover('${state.date}')`)}</div>`);
+  const quickLinks=`<div class="flex flex-wrap gap-2">${nav.filter(([id])=>canRead(id)&&id!=='dashboard').slice(0,4).map(([id,label])=>btn(label,`go('${id}')`,'ghost')).join('')}</div>`;
   return head('نظرة عامة على العمليات',`الحالة والنشاط بتاريخ ${ar(state.date)}`)+
   quickLinks+
   `<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">${gk('الضباط',g.officers,'text-emerald-600')}${gk('صف الضباط',g.ncos,'text-brand-600')}${gk('المدنيون',g.civilians,'text-violet-600')}${retiredRoll}${kpi('حضور الفرق',d.squadAttendance.present,'حاضرون اليوم','text-emerald-600')}${kpi('غياب الفرق',d.squadAttendance.absent,'غياب مسجل اليوم','text-rose-600')}${kpi('إجازة الفرق',d.squadAttendance.leave,'غير مسجلين حضوراً أو غياباً')}${kpi('حركة البوابة',d.entries+d.exits,`دخول ${ar(d.entries)} • خروج ${ar(d.exits)}`)}${kpi('الزيارات',d.visitors.total,`بالداخل الآن ${ar(d.visitors.inside)}`)}${kpi('المركبات بالداخل',d.vehiclesInside,'متواجدة حالياً')}${kpi('المأموريات والعيادات',d.missionsActive+d.clinicsActive,`مأموريات ${ar(d.missionsActive)} • عيادات ${ar(d.clinicsActive)}`)}${kpi('الإجازات السارية',d.leavesActive,'في التاريخ المحدد')}${kpi('مشتريات اليوم',money(d.purchasesTotal),'إجمالي مشتريات العسكريين')}</div>`+
@@ -586,7 +713,7 @@ const pages={
 
  async tasks(){const items=await api('tasks');
   const rows=items.map(t=>`<section class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-3">
-   <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold">${esc(t.title)}</h2><p class="mt-1 text-xs text-slate-500">من ${esc(t.created_by_name)} • ${ar(t.created_at.slice(0,16))}</p></div>${t.confirmed_at?tag('تم تأكيد الاستلام','green'):btn('تأكيد الاستلام',`confirmTask(${t.assignment_id})`)}</div>
+   <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold">${esc(t.title)}</h2><p class="mt-1 text-xs text-slate-500">من ${esc(t.created_by_name)} • ${ar(t.created_at.slice(0,16))}</p></div>${t.confirmed_at?tag('تم تأكيد الاستلام','green'):moduleAction('tasks','تأكيد الاستلام',`confirmTask(${t.assignment_id})`)}</div>
    ${t.details?`<p class="whitespace-pre-wrap text-sm leading-7">${esc(t.details)}</p>`:''}
    ${t.confirmed_at?`<p class="text-xs text-emerald-700 dark:text-emerald-300">تم التأكيد في ${ar(t.confirmed_at.slice(0,16))}</p>`:''}
   </section>`).join('');
@@ -607,7 +734,7 @@ const pages={
     <td class="pe-4 font-medium">${esc(item.subject)}</td>
     <td class="pe-4">${esc(item.responsible_section||'—')}<div class="text-xs text-slate-500">${esc(item.assigned_name||item.assigned_username||'غير مسندة')}</div></td>
     <td class="pe-4">${item.due_date?`${ar(item.due_date)}${item.due_date<today&&!['closed','replied'].includes(item.status)?`<div class="mt-1">${tag('متأخرة','red')}</div>`:''}`:'—'}</td>
-    <td class="pe-4"><select aria-label="حالة المكاتبة" onchange="updateCorrespondenceStatus(${item.id},this.value)" class="${INP} !mt-0 min-w-32">${CORRESPONDENCE_STATUSES.map(([key,label])=>`<option value="${key}" ${item.status===key?'selected':''}>${label}</option>`).join('')}</select></td>
+    <td class="pe-4"><select aria-label="حالة المكاتبة" ${canWrite('correspondence')?'':'disabled'} onchange="updateCorrespondenceStatus(${item.id},this.value)" class="${INP} !mt-0 min-w-32">${CORRESPONDENCE_STATUSES.map(([key,label])=>`<option value="${key}" ${item.status===key?'selected':''}>${label}</option>`).join('')}</select></td>
     <td class="pe-4"><div class="flex flex-wrap gap-2">${btn(`التفاصيل والمتابعة (${ar(item.message_count)})`,`run(()=>correspondenceDetails(${item.id}))`,'ghost')}${item.attachment_count?tag('📎 '+ar(item.attachment_count),'gray'):''}${delBtn('admin/correspondence/'+item.id)}</div></td></tr>`).join('');
   const filters=`<div class="no-print grid gap-3 md:grid-cols-4">
     <label class="text-xs font-medium">القسم المسؤول<input value="${esc(state.correspondenceSection)}" maxlength="120" onchange="state.correspondenceSection=this.value.trim();render()" class="${INP}"/></label>
@@ -616,7 +743,7 @@ const pages={
     <label class="text-xs font-medium">النوع<select onchange="state.correspondenceKind=this.value;render()" class="${INP}">${kinds.map(([value,label])=>`<option value="${value}" ${state.correspondenceKind===value?'selected':''}>${label}</option>`).join('')}</select></label>
     <label class="text-xs font-medium">الحالة<select onchange="state.correspondenceStatus=this.value;render()" class="${INP}">${statuses.map(([value,label])=>`<option value="${value}" ${state.correspondenceStatus===value?'selected':''}>${label}</option>`).join('')}</select></label></div>`;
   const exportUrl=`/api/correspondence.xlsx?${params.toString()}`;
-  return head('المكاتبات','سجل المكاتبات ومتابعة المسؤول والحالة والموعد.',`<span class="no-print flex gap-2">${btn('+ تسجيل مكاتبة','run(correspondenceForm)')}${btn('تصدير Excel',`location.href=${esc(JSON.stringify(exportUrl))}`,'ghost')}${btn('طباعة','window.print()','ghost')}</span>`)+
+  return head('المكاتبات','سجل المكاتبات ومتابعة المسؤول والحالة والموعد.',`<span class="no-print flex gap-2">${moduleAction('correspondence','+ تسجيل مكاتبة','run(correspondenceForm)')}${btn('تصدير Excel',`location.href=${esc(JSON.stringify(exportUrl))}`,'ghost')}${btn('طباعة','window.print()','ghost')}</span>`)+
     filters+`<div class="print-card">`+card('سجل المكاتبات',`<span class="text-xs text-slate-500">${ar(items.length)} مكاتبة</span>`,items.length?table(['النوع','الرقم','التاريخ','الجهات','الموضوع','المسؤول والقسم','موعد المتابعة','الحالة','الإجراءات'],rows):empty('لا توجد مكاتبات مطابقة للفلاتر.'))+`</div>`;
  },
 
@@ -627,35 +754,43 @@ const pages={
   const rows=l.map(p=>`<tr><td class="py-3 pe-4"><div class="font-medium">${esc(p.name)}</div><div class="text-xs text-slate-500" dir="ltr" style="text-align:start">${esc(p.mid)}</div></td><td class="pe-4">${esc(p.rank)}<div class="text-xs text-slate-500">${esc(p.cat)}</div></td><td class="pe-4">${esc(p.unit||'—')}</td>
    <td class="pe-4">${p.entry_time_today?ar(p.entry_time_today.slice(11,16)):tag('—','gray')}</td><td class="pe-4">${p.exit_time_today?ar(p.exit_time_today.slice(11,16)):tag('—','gray')}</td>
    <td class="pe-4"><div class="flex flex-wrap gap-1">${status(p.inside)}${p.on_mission?tag('في مأمورية','amber'):''}${p.on_duty?tag('نوبتجي','blue'):''}</div></td>
-   <td class="pe-4"><div class="flex gap-2">${p.grp==='soldiers'?tag('لا يلزم تسجيل خروج','gray'):p.inside?btn('تسجيل خروج',`toggle('personnel',${p.id})`,'danger'):tag('انتهت حركة اليوم','gray')}${btn('السجل',`run(()=>personHistory(${p.id}))`,'ghost')}</div></td></tr>`).join('');
-  return head('الأفراد',`سجّل دخول الفرد عند وصوله؛ يظل الموجود بالداخل ظاهرًا عبر الأيام حتى تسجل خروجه. لا يظهر الجنود هنا إلا بعد تأكيد عودتهم من الإجازة، ولا يلزم تسجيل خروجهم. — ${ar(state.date)}`,btn('+ إضافة فرد وتسجيل دخوله','run(personnelEntryForm)')+adminLink())+`<div class="flex flex-wrap gap-2">${tabs}</div>`+
+   <td class="pe-4"><div class="flex gap-2">${p.grp==='soldiers'?tag('لا يلزم تسجيل خروج','gray'):p.inside?moduleAction('personnel','تسجيل خروج',`toggle('personnel',${p.id})`,'danger'):tag('انتهت حركة اليوم','gray')}${btn('السجل',`run(()=>personHistory(${p.id}))`,'ghost')}</div></td></tr>`).join('');
+  return head('الأفراد',`سجّل دخول الفرد عند وصوله؛ يظل الموجود بالداخل ظاهرًا عبر الأيام حتى تسجل خروجه. لا يظهر الجنود هنا إلا بعد تأكيد عودتهم من الإجازة، ولا يلزم تسجيل خروجهم. — ${ar(state.date)}`,moduleAction('personnel','+ إضافة فرد وتسجيل دخوله','run(personnelEntryForm)')+adminLink())+`<div class="flex flex-wrap gap-2">${tabs}</div>`+
    card(`الأفراد الموجودون أو المسجلون اليوم (${ar(l.length)})`,'',l.length?table(['الاسم / الرقم','الرتبة','الوحدة','دخول اليوم','خروج اليوم','الحالة','الإجراءات'],rows):empty('لا توجد حركات أو أفراد بالداخل في هذه الفئة.'))},
 
  async vehicles(){const l=filt((await api('vehicles?date='+state.date)).map(v=>({...v,passenger_names:(v.passengers||[]).map(person=>person.name).join(' ')})),['plate','type','driver','rank','companion','companion_rank','purpose','passenger_names']);
-  const rows=l.map(v=>`<tr><td class="py-3 pe-4 font-medium">${esc(v.plate)}${v.is_manual?`<div class="mt-1">${tag('غير مسجلة','amber')}</div>`:''}</td><td class="pe-4">${esc(v.type)}</td><td class="pe-4">${esc(v.driver||'—')}<div class="text-xs text-slate-500">${esc(v.rank||'')}</div></td><td class="pe-4">${esc(v.companion||'—')}<div class="text-xs text-slate-500">${esc(v.companion_rank||'')}</div></td><td class="pe-4">${(v.passengers||[]).map(person=>`${esc(person.name)} <span class="text-xs text-slate-500">— ${esc(person.rank||'')}</span>`).join('<br>')||'—'}</td><td class="pe-4">${esc(v.purpose||'—')}</td><td class="pe-4">${v.is_manual&&v.is_completed?tag('غادرت','gray'):status(v.inside)}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${!v.is_manual&&state.date===today?btn(v.crew_assigned?'تغيير الطاقم':'تحديد طاقم اليوم',`run(()=>vehicleCrewForm(${v.id}))`,'ghost'):''}${v.is_manual&&v.is_completed?'':state.date!==today?tag('عرض فقط','gray'):btn(v.inside?'تسجيل خروج':'تسجيل دخول',v.is_manual?`manualVehicleMove(${esc(JSON.stringify(v.plate))},'${v.inside?'OUT':'IN'}')`:`vehicleMove(${v.id},${v.inside})`,v.inside?'danger':'primary')}${v.is_manual?btn('السجل',`run(()=>showVehicleHistory(${esc(JSON.stringify(v.plate))}))`,'ghost'):btn('السجل',`run(()=>vehicleHistory(${v.id}))`,'ghost')}</div></td></tr>`).join('');
-  const actions=btn('تسجيل حركة لمركبة غير مسجلة','manualVehicleMove()')+btn('بحث سجل مركبة','findVehicleHistoryForm()','ghost');
-  return head('المركبات',`اختر سائقاً ومرافقاً وأفراداً إضافيين لكل مركبة يومياً قبل تسجيل الحركة. — ${ar(state.date)}`,actions)+card('سجل المركبات المسجلة',`<span class="text-xs text-slate-500">${ar(l.length)} مركبة</span>`,l.length?table(['اللوحة','المركبة','السائق / الرتبة','المرافق / الرتبة','أفراد إضافيون','السبب','الحالة','الإجراءات'],rows):empty('لا توجد مركبات مسجلة. يمكنك تسجيل حركة مركبة غير مسجلة مباشرة.'))},
+  const rows=l.map(v=>`<tr><td class="py-3 pe-4 font-medium">${esc(v.plate)}</td><td class="pe-4">${esc(v.type)}</td><td class="pe-4">${esc(v.driver||'—')}<div class="text-xs text-slate-500">${esc(v.rank||'')}</div></td><td class="pe-4">${esc(v.companion||'—')}<div class="text-xs text-slate-500">${esc(v.companion_rank||'')}</div></td><td class="pe-4">${(v.passengers||[]).map(person=>`${esc(person.name)} <span class="text-xs text-slate-500">— ${esc(person.rank||'')}</span>`).join('<br>')||'—'}</td><td class="pe-4">${esc(v.purpose||'—')}</td><td class="pe-4">${status(v.inside)}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${state.date===today?moduleAction('vehicles',v.crew_assigned?'تغيير الطاقم':'تحديد طاقم اليوم',`run(()=>vehicleCrewForm(${v.id}))`,'ghost'):''}${state.date!==today?tag('عرض فقط','gray'):moduleAction('vehicles',v.inside?'تسجيل خروج':'تسجيل دخول',`vehicleMove(${v.id},${v.inside})`,v.inside?'danger':'primary')}${btn('السجل',`run(()=>vehicleHistory(${v.id}))`,'ghost')}</div></td></tr>`).join('');
+  const actions=btn('بحث سجل مركبة','findVehicleHistoryForm()','ghost');
+  return head('المركبات',`اختر سائقاً ومرافقاً وأفراداً إضافيين لكل مركبة مسجلة يومياً قبل تسجيل الحركة. المركبات المصاحبة للزيارات تسجل من صفحة الزيارات. — ${ar(state.date)}`,actions)+card('سجل المركبات المسجلة',`<span class="text-xs text-slate-500">${ar(l.length)} مركبة</span>`,l.length?table(['اللوحة','المركبة','السائق / الرتبة','المرافق / الرتبة','أفراد إضافيون','السبب','الحالة','الإجراءات'],rows):empty('لا توجد مركبات مسجلة.'))},
 
  async duty(){const l=await api('duty?date='+state.date);
   const rows=l.map(x=>`<tr><td class="py-3 pe-4">${tag(esc(x.role_label||'نوبتجي'),'blue')}</td><td class="pe-4 font-medium">${esc(x.person)}<div class="text-xs text-slate-500">${esc(x.rank||'')}</div></td><td class="pe-4">${ar(x.start_date)}</td><td class="pe-4">${ar(x.end_date)}</td><td class="pe-4 text-slate-500">${esc(x.notes||'—')}</td><td class="pe-4 text-slate-500">${esc(x.by)}</td><td class="pe-4">${delBtn('admin/duty/'+x.id)}</td></tr>`).join('');
-  return head('النوبتجية',`عيّن أفراد النوبتجية وحدد صفة كل فرد للفترة المطلوبة. — ${ar(state.date)}`,btn('+ تسجيل نوبتجي','dutyForm()'))+card('المسؤوليات والنوبتجية',`<span class="text-xs text-slate-500">${ar(l.length)}</span>`,l.length?table(['الصفة','الفرد','من','إلى','ملاحظات','بواسطة',''],rows):empty('لا يوجد نوبتجي مسجل في هذا التاريخ.'))},
+  return head('النوبتجية',`عيّن أفراد النوبتجية وحدد صفة كل فرد للفترة المطلوبة. — ${ar(state.date)}`,moduleAction('duty','+ تسجيل نوبتجي','dutyForm()'))+card('المسؤوليات والنوبتجية',`<span class="text-xs text-slate-500">${ar(l.length)}</span>`,l.length?table(['الصفة','الفرد','من','إلى','ملاحظات','بواسطة',''],rows):empty('لا يوجد نوبتجي مسجل في هذا التاريخ.'))},
 
- async missions(){const l=filt(await api('missions'),['person','dest','purpose','notes']);
-  const rows=l.map(m=>`<tr><td class="py-3 pe-4 font-medium">${esc(m.person)}<div class="text-xs text-slate-500">${esc(m.rank||'')}</div></td><td class="pe-4">${esc(m.dest)}</td><td class="pe-4">${esc(m.purpose||'—')}</td><td class="pe-4">${ar((m.start_ts||m.start_date).slice(0,16))} ${editTimestampButton('mission',m.id,'start_ts',m.start_ts,'الخروج للمأمورية')}</td>
-   <td class="pe-4">${m.status==='active'?tag('جارية','amber'):`${tag('عاد '+ar(m.end_ts.slice(0,16)),'green')} ${editTimestampButton('mission',m.id,'end_ts',m.end_ts,'العودة من المأمورية')}`}</td><td class="pe-4"><div class="flex gap-2">${m.status==='active'?btn('تسجيل العودة',`returnMission(${m.id})`):''}${delBtn('admin/missions/'+m.id)}</div></td></tr>`).join('');
-  return head('المأموريات','جهة المأمورية والفرد وتاريخ ووقت الخروج والعودة.',btn('+ مأمورية جديدة','missionForm()'))+card('سجل المأموريات',`<span class="text-xs text-slate-500">${ar(l.filter(m=>m.status==='active').length)} جارية</span>`,l.length?table(['الفرد','الجهة','الغرض','تاريخ ووقت الخروج','الحالة',''],rows):empty('لا توجد مأموريات.'))},
+ async missions(){const l=filt(await api('missions'),['person','dest','purpose','notes','security_personnel_details','weapon_serial','security_vehicle_details','security_vehicle_type','security_vehicle_plate']);
+  const rows=l.map(m=>`<tr><td class="py-3 pe-4 font-medium">${esc(m.person)}<div class="text-xs text-slate-500">${esc(m.rank||'')}</div></td><td class="pe-4">${esc(m.dest)}</td><td class="pe-4">${esc(m.purpose||'—')}</td><td class="pe-4">${m.security_enabled?`<div class="font-medium">تأمين (${ar(m.security_personnel_count)} أفراد)</div><div class="text-xs text-slate-500">${savedPeopleSummary(m.security_personnel_details)}<br>السلاح: ${esc(m.weapon_serial)} • حي: ${ar(m.live_ammo_count)} / فشنك: ${ar(m.blank_ammo_count)}</div>`:'بدون تأمين'}${m.security_has_vehicle?`<div class="mt-1 text-xs text-slate-600 dark:text-slate-300">سيارة المأمورية: ${esc([m.security_vehicle_type,m.security_vehicle_plate].filter(Boolean).join(' — ')||m.security_vehicle_details)}</div>`:''}</td>  <td class="pe-4">${ar((m.start_ts||m.start_date).slice(0,16))} ${canWrite('missions')?editTimestampButton('mission',m.id,'start_ts',m.start_ts,'الخروج للمأمورية'):''}</td>
+  <td class="pe-4">${m.status==='active'?tag('جارية','amber'):`${tag('عاد '+ar(m.end_ts.slice(0,16)),'green')} ${canWrite('missions')?editTimestampButton('mission',m.id,'end_ts',m.end_ts,'العودة من المأمورية'):''}`}</td><td class="pe-4"><div class="flex gap-2">${m.status==='active'?moduleAction('missions','تسجيل العودة',`returnMission(${m.id})`):''}${delBtn('admin/missions/'+m.id)}</div></td></tr>`).join('');
+  return head('المأموريات','جهة المأمورية والفرد وتاريخ ووقت الخروج والعودة وبيانات التأمين.',moduleAction('missions','+ مأمورية جديدة','missionForm()'))+card('سجل المأموريات',`<span class="text-xs text-slate-500">${ar(l.filter(m=>m.status==='active').length)} جارية</span>`,l.length?table(['الفرد','الجهة','الغرض','التأمين','تاريخ ووقت الخروج','الحالة',''],rows):empty('لا توجد مأموريات.'))},
 
  async clinics(){const l=filt(await api('clinics?date='+state.date),['person','rank','case_details','hospital']);
-  const rows=l.map(c=>`<tr><td class="py-3 pe-4 font-medium">${esc(c.person)}<div class="text-xs text-slate-500">${esc(c.rank||'')}</div></td><td class="pe-4">${esc(c.case_details)}</td><td class="pe-4">${esc(c.hospital||'—')}</td><td class="pe-4">${ar(c.start_ts.slice(0,16))} ${editTimestampButton('clinic',c.id,'start_ts',c.start_ts,'الخروج للعيادة')}</td><td class="pe-4">${c.end_ts?`${ar(c.end_ts.slice(0,16))} ${editTimestampButton('clinic',c.id,'end_ts',c.end_ts,'العودة من العيادة')}`:tag('لم يعد','amber')}</td><td class="pe-4"><div class="flex gap-2">${c.status==='active'?btn('تسجيل العودة',`returnClinic(${c.id})`,'ok'):''}${delBtn('admin/clinics/'+c.id)}</div></td></tr>`).join('');
-  return head('العيادات','تسجيل خروج الأفراد للمستشفى والحالة ووقت العودة.',btn('+ خروج للعيادة','clinicForm()'))+card('سجل العيادات',`<span class="text-xs text-slate-500">${ar(l.filter(c=>c.status==='active').length)} بالخارج</span>`,l.length?table(['الفرد / الرتبة','الحالة','المستشفى','وقت الخروج','وقت العودة',''],rows):empty('لا توجد حالات عيادة مسجلة.'))},
+  const rows=l.map(c=>`<tr><td class="py-3 pe-4 font-medium">${esc(c.person)}<div class="text-xs text-slate-500">${esc(c.rank||'')}</div></td><td class="pe-4">${esc(c.case_details)}</td><td class="pe-4">${esc(c.hospital||'—')}</td><td class="pe-4">${ar(c.start_ts.slice(0,16))} ${canWrite('clinics')?editTimestampButton('clinic',c.id,'start_ts',c.start_ts,'الخروج للعيادة'):''}</td><td class="pe-4">${c.end_ts?`${ar(c.end_ts.slice(0,16))} ${canWrite('clinics')?editTimestampButton('clinic',c.id,'end_ts',c.end_ts,'العودة من العيادة'):''}`:tag('لم يعد','amber')}</td><td class="pe-4"><div class="flex gap-2">${c.status==='active'?moduleAction('clinics','تسجيل العودة',`returnClinic(${c.id})`,'ok'):''}${delBtn('admin/clinics/'+c.id)}</div></td></tr>`).join('');
+  return head('العيادات','تسجيل خروج الأفراد للمستشفى والحالة ووقت العودة.',moduleAction('clinics','+ خروج للعيادة','clinicForm()'))+card('سجل العيادات',`<span class="text-xs text-slate-500">${ar(l.filter(c=>c.status==='active').length)} بالخارج</span>`,l.length?table(['الفرد / الرتبة','الحالة','المستشفى','وقت الخروج','وقت العودة',''],rows):empty('لا توجد حالات عيادة مسجلة.'))},
 
  async leaves(){const l=filt(await api('leaves?date='+state.date),['person','rank','reason']);
-  const rows=l.map(x=>`<tr><td class="py-3 pe-4 font-medium">${esc(x.person)}<div class="text-xs text-slate-500">${esc(x.rank||'')}</div></td><td class="pe-4">${ar(x.start_date)}</td><td class="pe-4">${x.expected_return_at?`${ar(x.expected_return_at.slice(0,16))} ${editTimestampButton('leave',x.id,'expected_return_at',x.expected_return_at,'موعد العودة المتوقع')}`:'—'}</td><td class="pe-4">${esc(x.reason||'—')}</td><td class="pe-4">${x.departed_at?`${ar(x.departed_at.slice(0,16))} ${editTimestampButton('leave',x.id,'departed_at',x.departed_at,'خروج الإجازة')}`:tag('لم يغادر بعد','gray')}</td><td class="pe-4">${x.returned_at?`${ar(x.returned_at.slice(0,16))} ${editTimestampButton('leave',x.id,'returned_at',x.returned_at,'العودة من الإجازة')}`:x.departed_at?tag('بالخارج','amber'):tag('مجدولة','blue')}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${!x.departed_at?btn('تسجيل الخروج من الوحدة',`departLeave(${x.id})`,'danger'):!x.returned_at?btn('تأكيد العودة',`returnLeave(${x.id})`,'ok'):''}${delBtn('admin/leaves/'+x.id)}</div></td></tr>`).join('');
-  return head('الإجازات',`سجّل موعد العودة المتوقع، ثم سجّل وقت الخروج الفعلي وتأكيد العودة. تظهر الإجازة المتأخرة حتى تأكيد رجوع صاحبها. — ${ar(state.date)}`,btn('+ تسجيل إجازة','leaveForm()'))+card('سجل الإجازات',`<span class="text-xs text-slate-500">${ar(l.filter(x=>x.departed_at&&!x.returned_at).length)} بالخارج</span>`,l.length?table(['الفرد / الرتبة','بداية الإجازة','موعد العودة المتوقع','السبب','الخروج الفعلي','العودة الفعلية','الإجراءات'],rows):empty('لا توجد إجازات سارية أو حركات إجازة في هذا التاريخ.'))},
+  const rows=l.map(x=>`<tr><td class="py-3 pe-4 font-medium">${esc(x.person)}<div class="text-xs text-slate-500">${esc(x.rank||'')}</div></td><td class="pe-4">${ar(x.start_date)}</td><td class="pe-4">${x.expected_return_at?`${ar(x.expected_return_at.slice(0,16))} ${canWrite('leaves')?editTimestampButton('leave',x.id,'expected_return_at',x.expected_return_at,'موعد العودة المتوقع'):''}`:'—'}</td><td class="pe-4">${esc(x.reason||'—')}</td><td class="pe-4">${x.departed_at?`${ar(x.departed_at.slice(0,16))} ${canWrite('leaves')?editTimestampButton('leave',x.id,'departed_at',x.departed_at,'خروج الإجازة'):''}`:tag('لم يغادر بعد','gray')}</td><td class="pe-4">${x.returned_at?`${ar(x.returned_at.slice(0,16))} ${canWrite('leaves')?editTimestampButton('leave',x.id,'returned_at',x.returned_at,'العودة من الإجازة'):''}`:x.departed_at?tag('بالخارج','amber'):tag('مجدولة','blue')}</td><td class="pe-4"><div class="flex flex-wrap gap-2">${!x.departed_at?moduleAction('leaves','تسجيل الخروج من الوحدة',`departLeave(${x.id})`,'danger'):!x.returned_at?moduleAction('leaves','تأكيد العودة',`returnLeave(${x.id})`,'ok'):''}${delBtn('admin/leaves/'+x.id)}</div></td></tr>`).join('');
+  return head('الإجازات',`سجّل موعد العودة المتوقع، ثم سجّل وقت الخروج الفعلي وتأكيد العودة. تظهر الإجازة المتأخرة حتى تأكيد رجوع صاحبها. — ${ar(state.date)}`,moduleAction('leaves','+ تسجيل إجازة','leaveForm()'))+card('سجل الإجازات',`<span class="text-xs text-slate-500">${ar(l.filter(x=>x.departed_at&&!x.returned_at).length)} بالخارج</span>`,l.length?table(['الفرد / الرتبة','بداية الإجازة','موعد العودة المتوقع','السبب','الخروج الفعلي','العودة الفعلية','الإجراءات'],rows):empty('لا توجد إجازات سارية أو حركات إجازة في هذا التاريخ.'))},
 
- async visitors(){const l=filt(await api('visitors?date='+state.date),['name','rank','unit','reason']);
-  const rows=l.map(v=>`<tr><td class="py-3 pe-4 font-medium">${esc(v.name)}</td><td class="pe-4">${esc(v.rank)}</td><td class="pe-4">${esc(v.unit||'—')}</td><td class="pe-4">${esc(v.reason||'—')}</td><td class="pe-4">${ar(v.enter_ts.slice(0,16))} ${editTimestampButton('visitor',v.id,'enter_ts',v.enter_ts,'دخول الزائر')}</td><td class="pe-4">${v.exit_ts?`${ar(v.exit_ts.slice(0,16))} ${editTimestampButton('visitor',v.id,'exit_ts',v.exit_ts,'خروج الزائر')}`:tag('بالداخل','green')}</td><td class="pe-4"><div class="flex gap-2">${v.exit_ts?'':btn('تسجيل الخروج',`exitVisitor(${v.id})`,'danger')}${delBtn('admin/visitors/'+v.id)}</div></td></tr>`).join('');
-  return head('الزيارات','تسجيل الاسم والرتبة والوحدة وسبب الزيارة ووقتي الدخول والخروج.',btn('+ تسجيل زيارة','visitorForm()'))+card('سجل الزيارات',`<span class="text-xs text-slate-500">${ar(l.filter(v=>!v.exit_ts).length)} بالداخل</span>`,l.length?table(['الاسم','الرتبة','الوحدة','سبب الزيارة','وقت الدخول','وقت الخروج',''],rows):empty('لا توجد زيارات مسجلة.'))},
+ async absences(){const absences=filt(await api('absences'),['person','rank','due_at']);
+  const rows=absences.map(item=>`<tr><td class="py-3 pe-4 font-medium">${esc(item.person)}<div class="text-xs text-slate-500">${esc(item.rank||'')}</div></td>
+    <td class="pe-4">${ar(item.due_at.slice(0,16))}</td><td class="pe-4">${item.expected_return_at?ar(item.expected_return_at.slice(0,16)):'—'}</td>
+    <td class="pe-4">${item.status==='no_show'?tag('لم يصل','amber'):tag('بانتظار التأكيد','blue')}</td>
+    <td class="pe-4"><div class="flex flex-wrap gap-2">${btn('تأكيد الوصول',`confirmSoldierReturn(${item.event_id})`,'ok')}${btn('لم يصل',`absentReturnForm(${item.event_id})`,'danger')}</div></td></tr>`).join('');
+  return head('الغياب','الأفراد الذين لم يؤكد وصولهم بعد موعد العودة المتوقع. يظل الفرد هنا حتى تأكيد الوصول.', '')+
+    card('متابعة الغياب',`${ar(absences.length)} فرد`,absences.length?table(['الفرد / الرتبة','موعد العودة السابق','موعد العودة المحدّث','الحالة','إجراء'],rows):empty('لا يوجد أفراد في قسم الغياب حالياً.'))},
+
+ async visitors(){const l=filt(await api('visitors?date='+state.date),['name','rank','unit','reason','valuables_details','vehicle_details','vehicle_type','vehicle_plate','companion_details']);
+  const rows=l.map(v=>`<tr><td class="py-3 pe-4 font-medium">${esc(v.name)}</td><td class="pe-4">${esc(v.rank)}</td><td class="pe-4">${esc(v.unit||'—')}</td><td class="pe-4">${esc(v.reason||'—')}</td><td class="pe-4 text-sm">${[v.has_valuables?`أمانات: ${esc(v.valuables_details)}`:'',v.has_vehicle?`سيارة: ${esc([v.vehicle_type,v.vehicle_plate].filter(Boolean).join(' — ')||v.vehicle_details)}`:'',v.has_companions?`مرافقون (${ar(v.companion_count)}): ${savedPeopleSummary(v.companion_details)}`:''].filter(Boolean).join('<br>')||'—'}</td><td class="pe-4">${ar(v.enter_ts.slice(0,16))} ${canWrite('visitors')?editTimestampButton('visitor',v.id,'enter_ts',v.enter_ts,'دخول الزائر'):''}</td><td class="pe-4">${v.exit_ts?`${ar(v.exit_ts.slice(0,16))} ${canWrite('visitors')?editTimestampButton('visitor',v.id,'exit_ts',v.exit_ts,'خروج الزائر'):''}`:tag('بالداخل','green')}</td><td class="pe-4"><div class="flex gap-2">${v.exit_ts?'':moduleAction('visitors','تسجيل الخروج',`exitVisitor(${v.id})`,'danger')}${delBtn('admin/visitors/'+v.id)}</div></td></tr>`).join('');
+  return head('الزيارات','سجّل بيانات الشخص الزائر، والأمانات والسيارة والمرافقين إن وجدوا.',moduleAction('visitors','+ تسجيل زيارة','visitorForm()'))+card('سجل الزيارات',`<span class="text-xs text-slate-500">${ar(l.filter(v=>!v.exit_ts).length)} بالداخل</span>`,l.length?table(['الاسم','الرتبة','الوحدة','سبب الزيارة','بيانات الزيارة','وقت الدخول','وقت الخروج',''],rows):empty('لا توجد زيارات مسجلة.'))},
 
  async squads(){const l=filt(await api('squads?date='+state.date),['name']);
   const rows=l.map(s=>`<tr><td class="py-3 pe-4 font-medium">${esc(s.name)}</td><td class="pe-4">${ar(s.start_date)}</td><td class="pe-4">${ar(s.end_date)}</td><td class="pe-4">${ar(s.member_count)}</td><td class="pe-4"><div class="flex gap-2">${btn('الأفراد والحضور',`run(()=>manageSquad(${s.id}))`,'ghost')}${delBtn('admin/squads/'+s.id)}</div></td></tr>`).join('');
@@ -666,7 +801,7 @@ const pages={
   const recs=d.records.map(r=>`<section class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-3">
    <div class="flex flex-wrap items-center justify-between gap-2"><div><div class="font-semibold">${esc(r.person)} <span class="text-xs font-normal text-slate-500">${esc(r.rank||'')}</span></div><div class="text-xs text-slate-500">${ar(r.date)} • بواسطة ${esc(r.by)}</div></div>${delBtn('admin/purchases/'+r.id)}</div>
    ${table(['الصنف','السعر','العدد','الإجمالي'],r.lines.map(l=>`<tr><td class="py-2 pe-4">${esc(l.item)}</td><td class="pe-4">${money(l.price_cents)}</td><td class="pe-4">${ar(l.qty)}</td><td class="pe-4 font-medium">${money(l.price_cents*l.qty)}</td></tr>`).join('')+`<tr><td colspan="3" class="pt-3 pe-4 font-semibold">إجمالي العسكري</td><td class="pt-3 font-bold">${money(r.total_cents)}</td></tr>`)}</section>`).join('');
-  return head('المشتريات','ما اشتراه العسكري وأحضره معه عند خروجه.',btn('+ تسجيل مشتريات','purchaseForm()')+btn('تصدير CSV',"exportCSV('purchases')",'ghost'))+bar+
+  return head('المشتريات','ما اشتراه العسكري وأحضره معه عند خروجه.',moduleAction('purchases','+ تسجيل مشتريات','purchaseForm()')+btn('تصدير CSV',"exportCSV('purchases')",'ghost'))+bar+
    (recs||empty('لا توجد مشتريات في هذه الفترة.'))+`<div class="flex items-center justify-between rounded-2xl bg-brand-600 text-white p-5"><span class="font-semibold">الإجمالي العام للفترة</span><span class="text-2xl font-bold">${money(d.total_cents)}</span></div>`},
 
  async movements(){const l=await api('movements?date='+state.date);
@@ -680,7 +815,7 @@ const pages={
   const sectionOptions=`<option value="">كل الأقسام</option><option value="personnel" ${state.reportSection==='personnel'?'selected':''}>الأفراد</option><option value="vehicle" ${state.reportSection==='vehicle'?'selected':''}>المركبات</option>`;
   const time=value=>value?`<time dir="ltr" class="inline-block rounded-lg bg-slate-100 dark:bg-slate-800 px-2 py-1 text-sm font-semibold">${ar(value.replace('T',' ').slice(0,16))}</time>`:'<span class="text-slate-500">لم يسجل</span>';
   const personLabel=(rank,name)=>`${esc(rank||'فرد')} / ${esc(name)}`;
-  const editAction=(type,id,field,value,label)=>editTimestampButton(type,id,field,value,label);
+  const editAction=(type,id,field,value,label)=>canWrite(({movement:'movements',visitor:'visitors',clinic:'clinics',leave:'leaves'})[type])?editTimestampButton(type,id,field,value,label):'';
   const departureLines=daily.leaves.departures.map(leave=>`<li class="daily-report-row"><span>${personLabel(leave.rank,leave.person)} أخذ إجازة بتاريخ ${time(leave.departed_at)} وسيعود يوم ${time(leave.expected_return_at||leave.end_date)}</span><span class="no-print flex flex-wrap gap-1">${editAction('leave',leave.id,'departed_at',leave.departed_at,'خروج الإجازة')}${editAction('leave',leave.id,'expected_return_at',leave.expected_return_at,'موعد العودة المتوقع')}</span></li>`).join('');
   const returnLines=daily.leaves.returns.map(leave=>`<li class="daily-report-row"><span>عاد ${personLabel(leave.rank,leave.person)} من الإجازة التي أخذها بتاريخ ${time(leave.departed_at)} وعاد في تمام ${time(leave.returned_at)}</span><span class="no-print flex flex-wrap gap-1">${editAction('leave',leave.id,'departed_at',leave.departed_at,'خروج الإجازة')}${editAction('leave',leave.id,'returned_at',leave.returned_at,'العودة من الإجازة')}</span></li>`).join('');
   const visitorLines=daily.visitors.map(visitor=>`<li class="daily-report-row"><span>${esc(visitor.rank)} (${esc(visitor.name)}) بتاريخ ${time(visitor.enter_ts)} وغادر بتاريخ ${time(visitor.exit_ts)}</span><span class="no-print flex flex-wrap gap-1">${editAction('visitor',visitor.id,'enter_ts',visitor.enter_ts,'دخول الزائر')}${editAction('visitor',visitor.id,'exit_ts',visitor.exit_ts,'خروج الزائر')}</span></li>`).join('');
@@ -747,7 +882,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&menuBtn.get
 const logout=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/login.html'};
 (async()=>{
  try{ME=await api('me');const LK=await api('lookups'),nm=ME.full_name||ME.username;
-  meName.textContent=nm;meAv.textContent=nm[0];meRole.textContent=isAdmin()?'مدير النظام':'مشغّل بوابة';
+  meName.textContent=nm;meAv.textContent=nm[0];meRole.textContent=isAdmin()?'مدير النظام':(ME.group_name||'مشغّل بوابة');
   if(isAdmin())meRole.insertAdjacentHTML('afterend','<a href="/admin.html" class="block text-xs text-brand-600">⚙️ إدارة البيانات</a>');
   gateSel.innerHTML=LK.gate.map(g=>`<option>${esc(g.name)}</option>`).join('');
   gateSel.value=localStorage.getItem('gate')||'';if(!gateSel.value)gateSel.selectedIndex=0;
@@ -759,6 +894,7 @@ const logout=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.
   }
   refreshInboxNotifications().catch(e=>console.error('Unable to refresh member notifications:',e));
   setInterval(()=>refreshInboxNotifications().catch(e=>console.error('Unable to refresh member notifications:',e)),15000);
+  if(!canRead(state.page))state.page=nav.find(([id])=>canRead(id))?.[0]||'dashboard';
  }catch(e){return}
  renderNav();render();
 })();
